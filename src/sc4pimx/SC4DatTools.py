@@ -98,6 +98,17 @@ def hex2str(v, size=32, upper=False):
         return ('0x%016' + x) % (int(v) & 0xFFFFFFFFFFFFFFFF)
 
 
+# Exemplar Types whose properties are actually parsed. Everything else is
+# stubbed out wholesale (see Prop.__init__ and SC4Exemplar.DecodeBinary) --
+# parsing every exemplar in a large plugins folder is the single most expensive
+# thing the loader can do. 0x28 (Submenu Button) is on the list not because the
+# browser shows those exemplars, but because SC4MenuScanner needs their
+# parent/order/name props to build the submenu tree, and there are only ever a
+# handful of them.
+PARSED_EXEMPLAR_KINDS = (30, 2, 17, 15, 16, 0x28)
+SUBMENU_BUTTON_KIND = 0x28
+
+
 class Prop():
     # __slots__ avoids per-instance __dict__: at warm-start scale we create
     # ~440k Props during Finalize, and the dict overhead alone was a
@@ -122,7 +133,7 @@ class Prop():
         if kind is _KIND_UNSET:
             kind = exemplar.GetProp(16)
         if kind is not None:
-            if kind[0] not in [30, 2, 17, 15, 16]:
+            if kind[0] not in PARSED_EXEMPLAR_KINDS:
                 self.id = 0
                 return
         if binary:
@@ -486,7 +497,7 @@ class SC4Exemplar():
         # self.props is still empty here, so GetProp(16) resolves via the
         # parent cohort -- exactly what each Prop would compute individually.
         kind = self.GetProp(16)
-        if kind is not None and kind[0] not in (30, 2, 17, 15, 16):
+        if kind is not None and kind[0] not in PARSED_EXEMPLAR_KINDS:
             # Whole-exemplar skip: every Prop would no-op with id=0 anyway.
             # Synthesise minimal stubs without parsing the buffer.
             stubs = [None] * nbrProp

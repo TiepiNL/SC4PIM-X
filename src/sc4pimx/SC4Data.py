@@ -7,6 +7,7 @@ import codecs
 import functools
 import logging
 import os
+import struct
 import threading
 from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
@@ -18,7 +19,7 @@ from .paths import asset_path, image_db_path
 from .S3DReader import S3D
 from .SC4DataFunctions import ToTile
 from .SC4DatTools import *
-from .textutil import parse_sc4_xml
+from .textutil import encode_sc4_text, parse_sc4_xml
 from .translation import *
 from .util import basic_cmp
 
@@ -420,6 +421,25 @@ def CreateAPropFromString(prop, value):
     else:
         buffer = '0x%08x:{"%s"}=%s:%d:(%s)' % (prop.ID, prop.Name, prop.Type, count, value)
     return buffer
+
+
+def make_ltext_entry(t, g, i, utxt, file_name):
+    """A standalone LTEXT SC4Entry for (t, g, i), ready for ``addEntries``.
+
+    Same wire format ``SC4PIMApp.CreateLTEXTEntry``/``DuplicateLTEXTEntry``
+    build inline, factored out so callers that aren't a bound property-page
+    method (e.g. dialogs generating a brand-new resource) can produce one too.
+    """
+    newVal = encode_sc4_text(utxt)
+    buffer = struct.pack('III', t, g, i)
+    buffer += struct.pack('II', 0, 4 + len(newVal))
+    entry = SC4Entry(buffer, 0, file_name)
+    content = struct.pack('H', len(utxt))
+    content += struct.pack('H', 4096)
+    content += newVal
+    entry.content = content
+    entry.Maj()
+    return entry
 
 
 def _env_true(name):
