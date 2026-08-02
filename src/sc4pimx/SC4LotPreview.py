@@ -337,6 +337,33 @@ def minmax(a, b):
     return (b, a)
 
 
+def LotObjectExceedsBounds(values, max_x, max_y):
+    """True if a LotConfigPropertyLotObject row sits outside a max_x x max_y-tile lot.
+
+    max_x/max_y are lot dimensions in tiles (not the *16 metre form). Mirrors
+    the per-type coordinate checks in LotEditorWin.MoveByAmount: buildings
+    use their full min/max extent, props/flora only their centre point
+    (both continuous tile coordinates), and 1x1-tile objects (base/overlay
+    textures, water, land, transit) use the discrete tile index they occupy.
+    """
+    kind = values[0]
+    if kind == 0:
+        return (
+            ToTile(values[6]) < 0 or ToTile(values[7]) < 0
+            or ToTile(values[8]) > max_x or ToTile(values[9]) > max_y
+        )
+    if kind in (1, 4):
+        return (
+            ToTile(values[3]) < 0 or ToTile(values[5]) < 0
+            or ToTile(values[3]) > max_x or ToTile(values[5]) > max_y
+        )
+    if kind in (2, 5, 6, TRANSIT_OBJECT_TYPE):
+        tile_x = ToTileOrigin(values[3])
+        tile_z = ToTileOrigin(values[5])
+        return tile_x < 0 or tile_z < 0 or tile_x >= max_x or tile_z >= max_y
+    return False
+
+
 def QuadInQuad(qIn, qOut):
     minx, maxx = minmax(qOut[0], qOut[2])
     miny, maxy = minmax(qOut[1], qOut[3])
@@ -867,6 +894,11 @@ class LotEditorWin(wx.Frame):
 
         icon_btn = self._make_toolbar_button(command_bar, "photo", LEXIconPreviewTitle, self.OnPreviewIcon)
         command_sizer.Add(icon_btn, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+
+        lot_properties_btn = self._make_toolbar_button(
+            command_bar, "ruler-2", lotPropertiesButtonTooltip, self.OnLotProperties
+        )
+        command_sizer.Add(lot_properties_btn, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
 
         layers_btn = self._make_toolbar_button(
             command_bar, "layers-selected", "%s\n%s" % (LEXToolbarLayers, LEXToolbarLayersHint), self.OnLayersMenu
@@ -3342,6 +3374,41 @@ class LotEditorWin(wx.Frame):
         dlg.ShowModal()
         dlg.Destroy()
 
+    def OnLotProperties(self, event=None):
+        """Size, road access, foundation and elevation tolerance for this lot."""
+        from .LotPropertiesDlg import LotPropertiesDialog
+
+        dlg = LotPropertiesDialog(self, self.exemplar, self.virtualDAT)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            changes = dlg.get_changes()
+            size_changed = dlg.size_changed
+            touched = bool(changes) or size_changed or dlg.retaining_wall_touched
+        finally:
+            dlg.Destroy()
+
+        if not touched:
+            return
+
+        for prop_id, values in changes.items():
+            self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[prop_id], values))
+        self.exemplar.modified = True
+
+        if size_changed:
+            # Re-runs Display()'s full geometry/city-context/cache refresh
+            # (see LotPropertiesDlg for why a full reload, not a partial
+            # patch, is used here).
+            self.Display(self.exemplar, self.virtualDAT)
+            if self.snapSize != 0:
+                self._rebuild_snap_grid()
+        else:
+            self.on_draw()
+
+        self.descPage.listProperties.DeleteAllItems()
+        self.descPage.FillTheList()
+        self.descPage.bSave.Enable(True)
+
     def _append_layer_menu(self, parent, view_key, title, layers):
         submenu = wx.Menu()
         all_on = wx.NewIdRef()
@@ -3864,32 +3931,41 @@ class LotEditorWin(wx.Frame):
     def OnToggleSnap(self, event):
         if self.snapSize == 0:
             self.snapSize = self.currentSnapSize
-            snapSize = self.snapSize
-            xS = 0 - snapSize
-            xE = self.lotSizeXOver + snapSize
-            yS = 0 - snapSize
-            yE = self.lotSizeYOver + snapSize
-            snapGrids = []
-            yC = yS
-            xC = xS
-            while 1:
-                snapGrids.append((xS, yC))
-                snapGrids.append((xE, yC))
-                yC += snapSize
-                if yC > yE:
-                    break
-
-            while 1:
-                snapGrids.append((xC, yS))
-                snapGrids.append((xC, yE))
-                xC += snapSize
-                if xC > xE:
-                    break
-
-            self.nbSnapLines = len(snapGrids)
-            self.snapGrids = numpy.asarray(snapGrids, dtype=numpy.float32)
+            self._rebuild_snap_grid()
         else:
             self.snapSize = 0
+
+    def _rebuild_snap_grid(self):
+        """Rebuild the snap-line grid from the current lot size.
+
+        Called on enabling snap, and again after a lot resize (Lot
+        Properties dialog) so an already-enabled grid doesn't keep using
+        the pre-resize bounds.
+        """
+        snapSize = self.snapSize
+        xS = 0 - snapSize
+        xE = self.lotSizeXOver + snapSize
+        yS = 0 - snapSize
+        yE = self.lotSizeYOver + snapSize
+        snapGrids = []
+        yC = yS
+        xC = xS
+        while 1:
+            snapGrids.append((xS, yC))
+            snapGrids.append((xE, yC))
+            yC += snapSize
+            if yC > yE:
+                break
+
+        while 1:
+            snapGrids.append((xC, yS))
+            snapGrids.append((xC, yE))
+            xC += snapSize
+            if xC > xE:
+                break
+
+        self.nbSnapLines = len(snapGrids)
+        self.snapGrids = numpy.asarray(snapGrids, dtype=numpy.float32)
 
     def OnSnapButton(self, event):
         """Toolbar Snap button: click toggles, Ctrl+click sets the grid size."""
