@@ -2283,6 +2283,7 @@ class NoteBookPanel(wx.Panel):
         self.descriptor = descriptor
         self.exemplar = descriptor.exemplar
         self.virtual_dat = virtual_dat
+        self.lotEditorWin = None
         self.RebuildViewer()
         self.bClose = wx.Button(self, -1, propertyPageClose)
         set_button_icon(self.bClose, "x")
@@ -2677,6 +2678,17 @@ class NoteBookPanel(wx.Panel):
             self.FillTheList()
         return
 
+    def _refresh_lot_editor_geometry(self):
+        # LotEditorWin caches lot size (px 2297284496) once in Display(); an
+        # open editor won't see later edits to that prop from this list.
+        frame = self.lotEditorWin
+        if frame is None:
+            return
+        try:
+            frame.Display(self.exemplar, self.virtual_dat)
+        except RuntimeError:
+            self.lotEditorWin = None
+
     def OnActivated(self, event):
         allowedPropEdit = [
             32, 662775824, 2308635565, 2317746857, 2317746872, 1246398704, 1771767972, 2297284498, 3919251084,
@@ -2747,6 +2759,8 @@ class NoteBookPanel(wx.Panel):
 
                 self.exemplar.props[idx - 3] = newProp
                 self.exemplar.modified = True
+                if newProp.id == 2297284496:
+                    self._refresh_lot_editor_geometry()
                 formatted = ConvertAPropToReadable(newProp, prop_def)
                 listItems.SetItem(idx, 0, name)
                 listItems.SetItem(idx, 1, '0x%08X' % newProp.id)
@@ -2784,6 +2798,8 @@ class NoteBookPanel(wx.Panel):
 
                 self.exemplar.props[idx - 3] = newProp
                 self.exemplar.modified = True
+                if newProp.id == 2297284496:
+                    self._refresh_lot_editor_geometry()
                 formatted = ConvertAPropToReadable(newProp, prop_def)
                 listItems.SetItem(idx, 0, name)
                 listItems.SetItem(idx, 1, '0x%08X' % newProp.id)
@@ -2823,6 +2839,8 @@ class NoteBookPanel(wx.Panel):
 
             self.exemplar.props[idx - 3] = newProp
             self.exemplar.modified = True
+            if newProp.id == 2297284496:
+                self._refresh_lot_editor_geometry()
             try:
                 name = self.virtual_dat.properties[newProp.id].Name
                 formatted = ConvertAPropToReadable(newProp, self.virtual_dat.properties[newProp.id])
@@ -4025,6 +4043,7 @@ class NoteBookPanel(wx.Panel):
                                                                                    800))
         frame.Display(self.exemplar, self.virtual_dat)
         frame.Show()
+        self.lotEditorWin = frame
         self.exemplar.modified = True
         self.bSave.Enable(True)
 
