@@ -3843,6 +3843,7 @@ class NoteBookPanel(wx.Panel):
         frame.on_draw()
         frame.on_draw()
         image = frame.Save()
+        frame.Close(True)
         iconImage = SC4IconMakerDlg.compose_lot_icon(image)
         cIO = io.BytesIO()
         iconImage.save(cIO, 'PNG')
