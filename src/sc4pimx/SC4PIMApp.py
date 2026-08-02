@@ -560,7 +560,8 @@ def _render_conversion_icon(parent, virtual_dat, source_lot_exemplar, file_name,
         finally:
             output.close()
     finally:
-        frame.Destroy()
+        # Destroy() skips EVT_CLOSE, leaving the Display() redraw timer pending.
+        frame.Close(True)
 
 
 def _deduplicate_entries(entries):
