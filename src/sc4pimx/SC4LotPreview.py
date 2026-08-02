@@ -497,7 +497,7 @@ class LEInspectorPanel(wx.Panel):
         self.applyBtn.Bind(wx.EVT_BUTTON, self.OnApply)
         fields.Add(self.applyBtn, 0, wx.EXPAND | wx.ALL, 4)
         self.transitPanel = TransitInspectorPanel(self, editor)
-        family_box = wx.StaticBox(self, -1, "Family variations")
+        family_box = wx.StaticBox(self, -1, LEXFamilyVariations)
         family_fields = wx.StaticBoxSizer(family_box, wx.VERTICAL)
         self.familyGrid = wx.ScrolledWindow(self, -1, style=wx.BORDER_NONE | wx.VSCROLL)
         self.familyGrid.SetBackgroundColour(wx.Colour(250, 251, 252))
