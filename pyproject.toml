@@ -20,7 +20,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "wxPython>=4.2.0",
+    # wxWidgets 3.3 provides native system/light/dark appearance support,
+    # including the first supported dark appearance for wxMSW.
+    "wxPython==4.3.0a16068+96cb1d0c",
     "pillow>=12.3.0",
     "numpy>=1.24.0,!=2.4.0",
     "PyOpenGL>=3.1.0",
@@ -49,6 +51,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sc4pimx"]
+
+[tool.uv.sources]
+wxpython = { index = "wxpython-snapshots" }
+
+[[tool.uv.index]]
+name = "wxpython-snapshots"
+url = "https://wxpython.org/Phoenix/snapshot-builds/"
+format = "flat"
+explicit = true
 
 [tool.black]
 line-length = 120

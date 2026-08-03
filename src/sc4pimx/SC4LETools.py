@@ -32,6 +32,7 @@ from .paths import asset_path, ensure_user_data_dir, image_db_path, user_data_pa
 from .SC4Data import *
 from .SC4OpenGL import *
 from .TablerIcons import icon_bundle, icon_toggle_button, set_button_icon
+from .UITheme import asset_card_colours, select
 from .translation import *
 from .util import basic_cmp
 
@@ -1287,10 +1288,10 @@ class LEAssetGrid(wx.ScrolledWindow):
     def OnPaint(self, event):
         dc = wx.AutoBufferedPaintDC(self)
         self.PrepareDC(dc)
-        dc.SetBackground(wx.Brush(wx.Colour(248, 249, 250)))
+        dc.SetBackground(wx.Brush(wx.SystemSettings.GetColour(wx.SYS_COLOUR_APPWORKSPACE)))
         dc.Clear()
         if not self.items:
-            dc.SetTextForeground(wx.Colour(92, 99, 106))
+            dc.SetTextForeground(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
             dc.DrawLabel(LEXAssetBrowserNoMatches, wx.Rect(0, 20, self.GetClientSize()[0], 30), wx.ALIGN_CENTER)
             return
         view_y = self.CalcUnscrolledPosition(0, 0)[1]
@@ -1327,8 +1328,7 @@ class LEAssetGrid(wx.ScrolledWindow):
     def _draw_card(self, dc, idx, rect):
         item = self.items[idx]
         selected = idx == self.selected
-        bg = wx.Colour(221, 235, 249) if selected else wx.Colour(255, 255, 255)
-        border = wx.Colour(65, 123, 188) if selected else wx.Colour(209, 214, 219)
+        bg, border, text = asset_card_colours(selected)
         dc.SetBrush(wx.Brush(bg))
         dc.SetPen(wx.Pen(border, 2 if selected else 1))
         dc.DrawRoundedRectangle(rect.x, rect.y, rect.width, rect.height, 6)
@@ -1367,23 +1367,23 @@ class LEAssetGrid(wx.ScrolledWindow):
             dc.DrawLabel(state_label, indicator, wx.ALIGN_CENTER)
         if self.compact_cards:
             # Small cards: just the name under the thumbnail.
-            dc.SetTextForeground(wx.Colour(25, 29, 33))
+            dc.SetTextForeground(text)
             dc.SetFont(wx.Font(8, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
             dc.DrawLabel(self._shorten(dc, item.label, rect.width - 10),
                          wx.Rect(rect.x + 5, rect.y + 19 + self.THUMB, rect.width - 10, 16),
                          wx.ALIGN_CENTER)
             return bool(frames)
         badge_rect = wx.Rect(rect.x + 10, rect.y + 19 + self.THUMB, rect.width - 20, 18)
-        dc.SetBrush(wx.Brush(wx.Colour(238, 241, 244)))
-        dc.SetPen(wx.Pen(wx.Colour(220, 224, 228)))
+        dc.SetBrush(wx.Brush(select((238, 241, 244), (55, 59, 64))))
+        dc.SetPen(wx.Pen(select((220, 224, 228), (78, 84, 90))))
         dc.DrawRoundedRectangle(badge_rect.x, badge_rect.y, badge_rect.width, badge_rect.height, 5)
-        dc.SetTextForeground(wx.Colour(74, 82, 90))
+        dc.SetTextForeground(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
         dc.SetFont(wx.Font(8, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
         dc.DrawLabel(self._shorten(dc, item.badge, badge_rect.width - 8), badge_rect.Deflate(4, 0), wx.ALIGN_CENTER)
-        dc.SetTextForeground(wx.Colour(25, 29, 33))
+        dc.SetTextForeground(text)
         dc.SetFont(wx.Font(9, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
         dc.DrawLabel(self._shorten(dc, item.label, rect.width - 18), wx.Rect(rect.x + 9, rect.y + 44 + self.THUMB, rect.width - 18, 18), wx.ALIGN_CENTER)
-        dc.SetTextForeground(wx.Colour(96, 104, 112))
+        dc.SetTextForeground(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
         dc.SetFont(wx.Font(8, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
         dc.DrawLabel(self._shorten(dc, item.sublabel, rect.width - 18), wx.Rect(rect.x + 9, rect.y + 65 + self.THUMB, rect.width - 18, 18), wx.ALIGN_CENTER)
         return bool(frames)

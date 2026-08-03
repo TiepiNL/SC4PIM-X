@@ -49,6 +49,7 @@ from .settings import *
 from .TablerIcons import dialog_button, dialog_button_sizer, icon_bitmap, icon_button, set_button_icon
 from .textutil import decode_sc4_string_prop, decode_sc4_text, decode_unicode_escape, encode_sc4_text
 from .translation import *
+from .UITheme import alternating_list_colours, property_table_colours
 from .util import DictWrapper, basic_cmp, clamp_to_tile
 from .version import get_version
 
@@ -2232,10 +2233,11 @@ class VirtualListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
         self.columns = ['name', 'file']
         self.sort_col = -1
         self.sort_ascending = True
+        odd_background, even_background = alternating_list_colours()
         self.attr1 = wx.ItemAttr()
-        self.attr1.SetBackgroundColour((255, 228, 181))
+        self.attr1.SetBackgroundColour(odd_background)
         self.attr2 = wx.ItemAttr()
-        self.attr2.SetBackgroundColour('light blue')
+        self.attr2.SetBackgroundColour(even_background)
         # Lazily-loaded row thumbnails. thumb_provider maps a list_datas entry
         # to a JPG path (or None); thumb_index caches path -> image-list index.
         self.thumb_size = 32
@@ -2688,16 +2690,17 @@ class NoteBookPanel(wx.Panel):
             self.listProperties.AutoFillLastColumn()
 
     def _fill_the_list(self):
+        colours = property_table_colours()
         idx = self.listProperties.InsertItem(self.listProperties.GetItemCount(), propertyPageFilename)
-        self.listProperties.SetItemBackgroundColour(idx, wx.Colour(205, 190, 112))
+        self.listProperties.SetItemBackgroundColour(idx, colours["metadata"])
         self.listProperties.SetItem(idx, 4, '%s' % self.exemplar.entry.fileName)
         idx = self.listProperties.InsertItem(self.listProperties.GetItemCount(), 'TGI')
-        self.listProperties.SetItemBackgroundColour(idx, wx.Colour(205, 190, 112))
+        self.listProperties.SetItemBackgroundColour(idx, colours["metadata"])
         self.listProperties.SetItem(idx, 4, '0x%08X 0x%08X 0x%08X' % (self.exemplar.entry.tgi[0],
                                                                             self.exemplar.entry.tgi[1],
                                                                             self.exemplar.entry.tgi[2]))
         idx = self.listProperties.InsertItem(self.listProperties.GetItemCount(), propertyPageParentCohort)
-        self.listProperties.SetItemBackgroundColour(idx, wx.Colour(205, 190, 112))
+        self.listProperties.SetItemBackgroundColour(idx, colours["metadata"])
         self.listProperties.SetItem(idx, 4, '0x%08X 0x%08X 0x%08X' % (self.exemplar.parentCohort[0],
                                                                             self.exemplar.parentCohort[1],
                                                                             self.exemplar.parentCohort[2]))
@@ -2716,23 +2719,23 @@ class NoteBookPanel(wx.Panel):
             self.listProperties.SetItem(idx, 4, '%s' % formatted)
             if prop.id == 138265735:
                 if prop.values != [0.0] * 256:
-                    self.listProperties.SetItemBackgroundColour(idx, wx.Colour(200, 99, 71))
+                    self.listProperties.SetItemBackgroundColour(idx, colours["invalid"])
             if prop.id == 709468037:
                 if self.virtual_dat.getEntry(0, 2527069872, prop.values[0]) is None:
-                    self.listProperties.SetItemBackgroundColour(idx, wx.Colour(200, 99, 71))
+                    self.listProperties.SetItemBackgroundColour(idx, colours["invalid"])
             if prop.id == 2317746872:
                 if self.virtual_dat.getEntry(2238569388, 1782082854, prop.values[0]) is None:
-                    self.listProperties.SetItemBackgroundColour(idx, wx.Colour(200, 99, 71))
+                    self.listProperties.SetItemBackgroundColour(idx, colours["invalid"])
             if prop.id == 3928360329:
                 if self.virtual_dat.getEntry(1697917002, 2835075954, prop.values[0]) is None:
-                    self.listProperties.SetItemBackgroundColour(idx, wx.Colour(200, 99, 71))
+                    self.listProperties.SetItemBackgroundColour(idx, colours["invalid"])
 
         def FamilyFill(cohort):
             if cohort is not None:
                 idx = self.listProperties.InsertItem(self.listProperties.GetItemCount(), propertyPageFamily)
                 formatted = '0x%08X 0x%08X 0x%08X' % (cohort.tgi[0], cohort.tgi[1], cohort.tgi[2])
                 self.listProperties.SetItem(idx, 4, '%s' % formatted)
-                self.listProperties.SetItemBackgroundColour(idx, wx.Colour(160, 190, 220))
+                self.listProperties.SetItemBackgroundColour(idx, colours["family_header"])
                 for prop in cohort.exemplar.props:
                     try:
                         name = self.virtual_dat.properties[prop.id].Name
@@ -2746,7 +2749,7 @@ class NoteBookPanel(wx.Panel):
                     self.listProperties.SetItem(idx, 2, '%s' % Prop.format2String[prop.typeValue])
                     self.listProperties.SetItem(idx, 3, '%d' % prop.count)
                     self.listProperties.SetItem(idx, 4, '%s' % formatted)
-                    self.listProperties.SetItemBackgroundColour(idx, wx.Colour(213, 239, 255))
+                    self.listProperties.SetItemBackgroundColour(idx, colours["family_value"])
 
                 RecurseFill(cohort.exemplar.link)
             return
@@ -2756,7 +2759,7 @@ class NoteBookPanel(wx.Panel):
                 idx = self.listProperties.InsertItem(self.listProperties.GetItemCount(), propertyPageInherited)
                 formatted = '0x%08X 0x%08X 0x%08X' % (link.tgi[0], link.tgi[1], link.tgi[2])
                 self.listProperties.SetItem(idx, 4, '%s' % formatted)
-                self.listProperties.SetItemBackgroundColour(idx, wx.Colour(190, 190, 190))
+                self.listProperties.SetItemBackgroundColour(idx, colours["inherited_header"])
                 for prop in link.exemplar.props:
                     try:
                         name = self.virtual_dat.properties[prop.id].Name
@@ -2770,7 +2773,7 @@ class NoteBookPanel(wx.Panel):
                     self.listProperties.SetItem(idx, 2, '%s' % Prop.format2String[prop.typeValue])
                     self.listProperties.SetItem(idx, 3, '%d' % prop.count)
                     self.listProperties.SetItem(idx, 4, '%s' % formatted)
-                    self.listProperties.SetItemBackgroundColour(idx, wx.Colour(255, 239, 213))
+                    self.listProperties.SetItemBackgroundColour(idx, colours["inherited_value"])
 
                 RecurseFill(link.exemplar.link)
             return
@@ -2780,7 +2783,7 @@ class NoteBookPanel(wx.Panel):
         IDK = self.exemplar.GetProp(3393284789)
         if UVNK or IDK:
             idx = self.listProperties.InsertItem(self.listProperties.GetItemCount(), propertyPageLTEXT)
-            self.listProperties.SetItemBackgroundColour(idx, wx.Colour(113, 255, 139))
+            self.listProperties.SetItemBackgroundColour(idx, colours["ltext_header"])
             if UVNK:
                 try:
                     uvnks = [self.virtual_dat.getEntry(UVNK[0], UVNK[1] + i, UVNK[2]) for i in offsetGID]
@@ -2801,7 +2804,7 @@ class NoteBookPanel(wx.Panel):
                         self.listProperties.SetItem(idx, 1, '0x%08X' % uvnk.tgi[1])
                         self.listProperties.SetItem(idx, 2, namedLang[i])
                         self.listProperties.SetItemData(idx, 805306368 + offsetGID[i])
-                        self.listProperties.SetItemBackgroundColour(idx, wx.Colour(213, 255, 239))
+                        self.listProperties.SetItemBackgroundColour(idx, colours["ltext_value"])
 
             if IDK and IDK != UVNK:
                 try:
@@ -2823,7 +2826,7 @@ class NoteBookPanel(wx.Panel):
                         self.listProperties.SetItem(idx, 1, '0x%08X' % idk.tgi[1])
                         self.listProperties.SetItem(idx, 2, namedLang[i])
                         self.listProperties.SetItemData(idx, 1073741824 + offsetGID[i])
-                        self.listProperties.SetItemBackgroundColour(idx, wx.Colour(213, 255, 239))
+                        self.listProperties.SetItemBackgroundColour(idx, colours["ltext_value"])
 
         propFamilies = self.exemplar.GetProp(662775920)
         if propFamilies:
@@ -6663,6 +6666,9 @@ class MainFrame(wx.Frame):
 class App(wx.App):
 
     def OnInit(self):
+        appearance_result = self.SetAppearance(wx.App.Appearance.System)
+        if appearance_result != wx.App.AppearanceResult.Ok:
+            logger.warning("Unable to enable the system application appearance: %s", appearance_result)
         frame = MainFrame()
         self.SetTopWindow(frame)
         frame.Show()
