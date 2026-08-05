@@ -13,11 +13,15 @@ from . import config
 
 APPEARANCE_MODES = ("system", "light", "dark")
 _appearance_mode_cache: str | None = None
-_dark_state_cache: tuple[str, bool] | None = None
 
 
 def appearance_mode() -> str:
-    """Return the configured appearance override, or 'system' if unset/invalid."""
+    """Return the configured appearance override, or 'system' if unset/invalid.
+
+    Cached: this reads config.toml, and is_dark() calls it on every owner-drawn
+    paint. GetAppearance() below is a cheap native call (~0.5us) and stays
+    uncached so a live OS theme switch is still picked up without a restart.
+    """
     global _appearance_mode_cache
     if _appearance_mode_cache is None:
         mode = str(config.load_settings().get("Appearance", "system")).lower()
@@ -26,10 +30,9 @@ def appearance_mode() -> str:
 
 
 def reset_appearance_cache() -> None:
-    """Clear cached appearance state, primarily for tests and app reinitialization."""
-    global _appearance_mode_cache, _dark_state_cache
+    """Clear the cached appearance mode, primarily for tests and app reinitialization."""
+    global _appearance_mode_cache
     _appearance_mode_cache = None
-    _dark_state_cache = None
 
 
 def is_dark() -> bool:
@@ -37,18 +40,12 @@ def is_dark() -> bool:
 
     Honours a user-configured override before falling back to the OS setting.
     """
-    global _dark_state_cache
     mode = appearance_mode()
-    if _dark_state_cache is not None and _dark_state_cache[0] == mode:
-        return _dark_state_cache[1]
     if mode == "dark":
-        result = True
-    elif mode == "light":
-        result = False
-    else:
-        result = bool(wx.SystemSettings.GetAppearance().IsDark())
-    _dark_state_cache = (mode, result)
-    return result
+        return True
+    if mode == "light":
+        return False
+    return bool(wx.SystemSettings.GetAppearance().IsDark())
 
 
 def select(light: tuple[int, int, int], dark: tuple[int, int, int]) -> wx.Colour:

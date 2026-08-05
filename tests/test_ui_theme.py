@@ -117,18 +117,18 @@ def test_is_dark_honours_dark_override(monkeypatch):
     assert UITheme.is_dark() is True
 
 
-def test_is_dark_reads_system_appearance_once(monkeypatch):
-    calls = []
+def test_is_dark_reads_system_appearance_live(monkeypatch):
+    state = {"dark": False}
     monkeypatch.setattr(UITheme, "appearance_mode", lambda: "system")
     monkeypatch.setattr(
         UITheme.wx,
         "SystemSettings",
-        SimpleNamespace(GetAppearance=lambda: calls.append(True) or SimpleNamespace(IsDark=lambda: True)),
+        SimpleNamespace(GetAppearance=lambda: SimpleNamespace(IsDark=lambda: state["dark"])),
     )
 
+    assert UITheme.is_dark() is False
+    state["dark"] = True
     assert UITheme.is_dark() is True
-    assert UITheme.is_dark() is True
-    assert calls == [True]
 
 
 def test_property_table_dark_colours_are_muted(monkeypatch):
