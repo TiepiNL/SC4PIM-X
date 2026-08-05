@@ -12,7 +12,7 @@ import threading
 from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 from . import FSHConverter
 from .paths import asset_path, image_db_path
@@ -88,15 +88,6 @@ def list_convertible_categories(building_root):
     visit(building_root, ())
     result.sort(key=lambda item: tuple(part.casefold() for part in item.breadcrumb))
     return result
-
-
-def _text_size(font, text):
-    """Return the (width, height) of rendered text.
-
-    Replaces ``ImageFont.getsize()``, which was removed in Pillow 10.
-    """
-    left, top, right, bottom = font.getbbox(text)
-    return (right - left, bottom - top)
 
 
 class Family:
@@ -539,21 +530,10 @@ class ImageListLoaderTexture(object):
     def __init__(self, virtualDAT):
         self.virtualDAT = virtualDAT
         self.keepGoing = self.running = False
-        self.font = ImageFont.truetype('arial.ttf', 12)
-        self.offset = _text_size(self.font, 'R')
-        # PIL FreeType font objects are not safe to share across threads, so
-        # each worker thread gets its own via _thread_font().
-        self._tls = threading.local()
-
-    def _thread_font(self):
-        font = getattr(self._tls, 'font', None)
-        if font is None:
-            font = ImageFont.truetype('arial.ttf', 12)
-            self._tls.font = font
-        return font
 
     def Start(self):
         self.keepGoing = self.running = True
+        self.virtualDAT.textureLayerCounts.clear()
         if _env_true('SC4PIM_SKIP_TEXTURE_IMAGES'):
             self.running = False
             return
@@ -588,7 +568,8 @@ class ImageListLoaderTexture(object):
         else:
             return basic_cmp(tgi1[0], tgi2[0])
 
-    def _AddTextureImage(self, rgb_bytes, size, trueAlpha, texEntry):
+    def _AddTextureImage(self, rgb_bytes, size, trueAlpha, texEntry, nbrLayers):
+        self.virtualDAT.textureLayerCounts[texEntry] = max(1, int(nbrLayers))
         expected = size[0] * size[1] * 3
         if len(rgb_bytes) != expected:
             logger.error('TextureLoader: invalid RGB buffer size for %s (%d != %d)',
@@ -636,9 +617,9 @@ class ImageListLoaderTexture(object):
                     if not self.keepGoing:
                         break
                     if result is not None:
-                        rgb_bytes, trueAlpha, texEntry = result
+                        rgb_bytes, trueAlpha, texEntry, nbrLayers = result
                         wx.CallAfter(self._AddTextureImage, rgb_bytes,
-                                     (64, 64), trueAlpha, texEntry)
+                                     (64, 64), trueAlpha, texEntry, nbrLayers)
         except Exception:
             logger.exception('Texture loader thread failed')
         wx.CallAfter(self._FinalizeTextureLists)
@@ -648,7 +629,7 @@ class ImageListLoaderTexture(object):
         """Decode one FSH texture to a 64x64 RGB byte buffer.
 
         Runs on a worker thread and performs no wx calls. Returns
-        ``(rgb_bytes, trueAlpha, texEntry)`` or ``None`` on failure.
+        ``(rgb_bytes, trueAlpha, texEntry, nbrLayers)`` or ``None`` on failure.
         """
         if not self.keepGoing:
             return None
@@ -681,30 +662,7 @@ class ImageListLoaderTexture(object):
                                texEntry.fileName, exc)
                 return None
         pilz = pilz.resize((64, 64), Image.BICUBIC)
-        font = self._thread_font()
-        if nbrLayers > 1:
-            try:
-                draw = ImageDraw.Draw(pilz)
-                draw.ellipse((64 - self.offset[0] - 8, 64 - self.offset[1] - 2,
-                              64 - self.offset[0] + 6, 64 - self.offset[1] + 12),
-                             fill=(156, 181, 140))
-                draw.text((64 - self.offset[0] - 5, 64 - self.offset[1] - 2), 'R',
-                          font=font, fill=(0, 0, 0))
-            except Exception:
-                logger.exception('Error generating texture overlay for %s',
-                                 texEntry.fileName)
-                return None
-
-        IID = texEntry.tgi[2] & 61440
-        if IID == 0 or IID == 4096 or IID == 8192 or IID == 12288:
-            signs = {0: '0', 4096: '$', 8192: '$$', 12288: '$$$'}
-            length = _text_size(font, signs[IID])
-            draw = ImageDraw.Draw(pilz)
-            draw.ellipse((2, 64 - self.offset[1] - 2, length[0] + 7,
-                          64 - self.offset[1] + 12), fill=(156, 181, 140))
-            draw.text((5, 64 - self.offset[1] - 2), signs[IID], font=font,
-                      fill=(0, 0, 0))
-        return pilz.convert('RGB').tobytes(), trueAlpha, texEntry
+        return pilz.convert('RGB').tobytes(), trueAlpha, texEntry, nbrLayers
         return
 
 
