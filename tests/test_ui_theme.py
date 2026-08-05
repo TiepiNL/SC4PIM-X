@@ -1,6 +1,15 @@
 from types import SimpleNamespace
 
+import pytest
+
 from sc4pimx import SC4PIMApp, TablerIcons, UITheme
+
+
+@pytest.fixture(autouse=True)
+def clear_appearance_cache():
+    UITheme.reset_appearance_cache()
+    yield
+    UITheme.reset_appearance_cache()
 
 
 def test_select_uses_dark_variant(monkeypatch):
@@ -87,6 +96,15 @@ def test_appearance_mode_reads_override(monkeypatch):
     assert UITheme.appearance_mode() == "dark"
 
 
+def test_appearance_mode_reads_settings_once(monkeypatch):
+    calls = []
+    monkeypatch.setattr(UITheme.config, "load_settings", lambda: calls.append(True) or {"Appearance": "dark"})
+
+    assert UITheme.appearance_mode() == "dark"
+    assert UITheme.appearance_mode() == "dark"
+    assert calls == [True]
+
+
 def test_is_dark_honours_light_override(monkeypatch):
     monkeypatch.setattr(UITheme, "appearance_mode", lambda: "light")
 
@@ -97,6 +115,20 @@ def test_is_dark_honours_dark_override(monkeypatch):
     monkeypatch.setattr(UITheme, "appearance_mode", lambda: "dark")
 
     assert UITheme.is_dark() is True
+
+
+def test_is_dark_reads_system_appearance_once(monkeypatch):
+    calls = []
+    monkeypatch.setattr(UITheme, "appearance_mode", lambda: "system")
+    monkeypatch.setattr(
+        UITheme.wx,
+        "SystemSettings",
+        SimpleNamespace(GetAppearance=lambda: calls.append(True) or SimpleNamespace(IsDark=lambda: True)),
+    )
+
+    assert UITheme.is_dark() is True
+    assert UITheme.is_dark() is True
+    assert calls == [True]
 
 
 def test_property_table_dark_colours_are_muted(monkeypatch):

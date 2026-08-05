@@ -12,12 +12,24 @@ import wx
 from . import config
 
 APPEARANCE_MODES = ("system", "light", "dark")
+_appearance_mode_cache: str | None = None
+_dark_state_cache: tuple[str, bool] | None = None
 
 
 def appearance_mode() -> str:
     """Return the configured appearance override, or 'system' if unset/invalid."""
-    mode = str(config.load_settings().get("Appearance", "system")).lower()
-    return mode if mode in APPEARANCE_MODES else "system"
+    global _appearance_mode_cache
+    if _appearance_mode_cache is None:
+        mode = str(config.load_settings().get("Appearance", "system")).lower()
+        _appearance_mode_cache = mode if mode in APPEARANCE_MODES else "system"
+    return _appearance_mode_cache
+
+
+def reset_appearance_cache() -> None:
+    """Clear cached appearance state, primarily for tests and app reinitialization."""
+    global _appearance_mode_cache, _dark_state_cache
+    _appearance_mode_cache = None
+    _dark_state_cache = None
 
 
 def is_dark() -> bool:
@@ -25,12 +37,18 @@ def is_dark() -> bool:
 
     Honours a user-configured override before falling back to the OS setting.
     """
+    global _dark_state_cache
     mode = appearance_mode()
+    if _dark_state_cache is not None and _dark_state_cache[0] == mode:
+        return _dark_state_cache[1]
     if mode == "dark":
-        return True
-    if mode == "light":
-        return False
-    return bool(wx.SystemSettings.GetAppearance().IsDark())
+        result = True
+    elif mode == "light":
+        result = False
+    else:
+        result = bool(wx.SystemSettings.GetAppearance().IsDark())
+    _dark_state_cache = (mode, result)
+    return result
 
 
 def select(light: tuple[int, int, int], dark: tuple[int, int, int]) -> wx.Colour:
