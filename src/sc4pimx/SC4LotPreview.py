@@ -488,10 +488,11 @@ class LEInspectorPanel(wx.Panel):
         self._last_family_id = None
         self._last_member_tgis = ()
         self._family_buttons = {}
-        self.SetBackgroundColour(wx.Colour(250, 251, 252))
+        surface = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+        self.SetBackgroundColour(surface)
         sizer = wx.BoxSizer(wx.VERTICAL)
         self.text = wx.TextCtrl(self, -1, LEXInspectorPrompt, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.BORDER_NONE)
-        self.text.SetBackgroundColour(wx.Colour(250, 251, 252))
+        self.text.SetBackgroundColour(surface)
         box = wx.StaticBox(self, -1, LEXInspectorEditPlacement)
         fields = wx.StaticBoxSizer(box, wx.VERTICAL)
         grid = wx.FlexGridSizer(3, 2, 4, 6)
@@ -527,7 +528,7 @@ class LEInspectorPanel(wx.Panel):
         family_box = wx.StaticBox(self, -1, LEXFamilyVariations)
         family_fields = wx.StaticBoxSizer(family_box, wx.VERTICAL)
         self.familyGrid = wx.ScrolledWindow(self, -1, style=wx.BORDER_NONE | wx.VSCROLL)
-        self.familyGrid.SetBackgroundColour(wx.Colour(250, 251, 252))
+        self.familyGrid.SetBackgroundColour(surface)
         self.familyGrid.SetScrollRate(0, 12)
         self.familySizer = wx.WrapSizer(wx.HORIZONTAL)
         self.familyGrid.SetSizer(self.familySizer)
@@ -839,7 +840,7 @@ class LotEditorWin(wx.Frame):
         self.s3DTexturesHolder.SetNightMode(self.nightMode)
         self._layer_menu_ids = {}
         self._undo_limit = max(1, int(settings.get("UndoLimit", 40)))
-        command_bar.SetBackgroundColour(wx.Colour(244, 246, 248))
+        command_bar.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE))
         command_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.lotContextLabel = wx.StaticText(command_bar, -1, LEXNoLotLoaded)
         self.lotContextLabel.SetFont(wx.Font(10, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
@@ -1007,7 +1008,7 @@ class LotEditorWin(wx.Frame):
 
     def _build_temporal_bar(self, parent):
         bar = wx.Panel(parent, -1)
-        bar.SetBackgroundColour(wx.Colour(244, 246, 248))
+        bar.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE))
         row = wx.BoxSizer(wx.HORIZONTAL)
         row.Add(wx.StaticText(bar, -1, LEXTemporalPreview), 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 8)
 
@@ -1245,7 +1246,7 @@ class LotEditorWin(wx.Frame):
         OnFitView/OnRotateViewLeft/OnRotateViewRight.
         """
         bar = wx.Panel(parent, -1)
-        bar.SetBackgroundColour(wx.Colour(244, 246, 248))
+        bar.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE))
         row = wx.BoxSizer(wx.HORIZONTAL)
 
         self._paneClusterItems = {"3d": [], "2d": []}

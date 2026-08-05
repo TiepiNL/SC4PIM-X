@@ -12,26 +12,14 @@ from typing import Iterable, Optional
 import wx
 import wx.lib.agw.ultimatelistctrl as ULC
 
+from .SC4MenuScanner import (
+    invalidate_menu_cache,
+    menu_entries,
+    root_label,
+)
 from .SC4OccupantGroupPicker import _centre_on_top_level, _monospace_font
 from .TablerIcons import dialog_button, set_button_icon
 from .translation import *  # noqa: F401,F403
-
-PROP_BUILDING_SUBMENUS = 0xAA1DD399
-
-
-_ROOT_LABELS = {
-    "SubMenuROOTRCI": "RCI",
-    "SubMenuROOTHighway": "Highway",
-    "SubMenuROOTRail": "Rail",
-    "SubMenuROOTMiscTransit": "Misc Transit",
-    "SubMenuROOTWaterTransit": "Water Transit",
-    "SubMenuROOTPowerUtility": "Power Utility",
-    "SubMenuROOTCivicPolice": "Civic Police",
-    "SubMenuROOTCivicEducation": "Civic Education",
-    "SubMenuROOTCivicHealth": "Civic Health",
-    "SubMenuROOTLandmarks": "Landmarks",
-    "SubMenuROOTPark": "Parks",
-}
 
 
 @dataclass(frozen=True)
@@ -130,9 +118,8 @@ class BuildingSubmenuPickerDialog(wx.Dialog):
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
         )
         self.virtual_dat = virtual_dat
-        prop_def = virtual_dat.properties[PROP_BUILDING_SUBMENUS]
-        self.options = getattr(prop_def, "Options", {})
-        self.option_groups = getattr(prop_def, "OptionGroups", {})
+        self.entries = menu_entries(virtual_dat)
+        self.options = {value: entry.label for value, entry in self.entries.items()}
         self.current_submenus = set(int(v) for v in (current_submenus or ()))
         self.preserve_unlisted = preserve_unlisted
         self.allow_manual = allow_manual
@@ -168,6 +155,8 @@ class BuildingSubmenuPickerDialog(wx.Dialog):
             ],
         )
         self.filterChoice.SetSelection(0)
+        self.refreshButton = wx.Button(self, -1, LEXBuildingSubmenuRefresh)
+        set_button_icon(self.refreshButton, "rotate-clockwise-2")
         self.list = BuildingSubmenuListCtrl(self)
         self.list.InsertColumn(0, LEXBuildingSubmenuColSelected, width=76)
         self.list.InsertColumn(1, LEXBuildingSubmenuColHex, width=120)
@@ -182,7 +171,8 @@ class BuildingSubmenuPickerDialog(wx.Dialog):
 
         top = wx.BoxSizer(wx.HORIZONTAL)
         top.Add(self.search, 1, wx.RIGHT | wx.EXPAND, 6)
-        top.Add(self.filterChoice, 0, wx.EXPAND)
+        top.Add(self.filterChoice, 0, wx.RIGHT, 6)
+        top.Add(self.refreshButton, 0, wx.EXPAND)
 
         if allow_manual:
             self.hexText = wx.TextCtrl(self, -1, "", style=wx.TE_PROCESS_ENTER)
@@ -211,6 +201,7 @@ class BuildingSubmenuPickerDialog(wx.Dialog):
 
         self.search.Bind(wx.EVT_TEXT, self._on_filter)
         self.filterChoice.Bind(wx.EVT_CHOICE, self._on_filter)
+        self.refreshButton.Bind(wx.EVT_BUTTON, self._on_refresh)
         self.list.Bind(ULC.EVT_LIST_COL_CLICK, self._on_column_click)
         self.list.Bind(ULC.EVT_LIST_ITEM_CHECKED, self._on_table_checked)
         if allow_manual:
@@ -219,12 +210,35 @@ class BuildingSubmenuPickerDialog(wx.Dialog):
 
         self._refresh()
 
+    def _on_refresh(self, event: wx.Event) -> None:
+        invalidate_menu_cache(self.virtual_dat)
+        self.entries = menu_entries(self.virtual_dat, force=True)
+        self.options = {value: entry.label for value, entry in self.entries.items()}
+        self._all_values = sorted(set(self._all_values) | set(self.options.keys()))
+        self._refresh()
+        event.Skip()
+
     def _label_for(self, value: int) -> str:
-        return self.options.get(value, LEXBuildingSubmenuUnknown % ("0x%08X" % value))
+        entry = self.entries.get(value)
+        return entry.label if entry is not None else LEXBuildingSubmenuUnknown % ("0x%08X" % value)
 
     def _root_for(self, value: int) -> str:
-        root = self.option_groups.get(value, "")
-        return _ROOT_LABELS.get(root, root.replace("SubMenuROOT", "") or LEXBuildingSubmenuNoRoot)
+        """The toolbar a submenu ultimately hangs off, following its parents."""
+        seen = set()
+        current = value
+        top = None
+        while current in self.entries and current not in seen:
+            seen.add(current)
+            entry = self.entries[current]
+            if entry.root_group:
+                return root_label(entry.root_group)
+            top = entry
+            current = entry.parent_id
+        if top is not None and top.parent_id:
+            # Hangs off a hardcoded game toolbar button; name it the same way
+            # the tree viewer's bucket does.
+            return LEXSubmenuTreeOrphan % ("0x%08X" % (int(top.parent_id) & 0xFFFFFFFF))
+        return LEXBuildingSubmenuNoRoot
 
     def _item_for(self, value: int) -> BuildingSubmenuItem:
         return BuildingSubmenuItem(
