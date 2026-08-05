@@ -50,12 +50,53 @@ def test_app_enables_system_appearance_before_creating_frame(monkeypatch):
         or SC4PIMApp.wx.App.AppearanceResult.Ok,
         SetTopWindow=lambda value: calls.append(("top", value)),
     )
+    monkeypatch.setattr(SC4PIMApp.UITheme, "appearance_mode", lambda: "system")
     monkeypatch.setattr(SC4PIMApp, "MainFrame", lambda: calls.append("frame") or frame)
     monkeypatch.setattr(SC4PIMApp.wx, "CallAfter", lambda callback: calls.append(("after", callback)))
 
     assert SC4PIMApp.App.OnInit(app) is True
     assert calls[0] == ("appearance", SC4PIMApp.wx.App.Appearance.System)
     assert calls[1] == "frame"
+
+
+def test_app_enables_dark_appearance_when_overridden(monkeypatch):
+    calls = []
+    frame = SimpleNamespace(Show=lambda: calls.append("show"), StartStartup=lambda: None)
+    app = SimpleNamespace(
+        SetAppearance=lambda appearance: calls.append(("appearance", appearance))
+        or SC4PIMApp.wx.App.AppearanceResult.Ok,
+        SetTopWindow=lambda value: calls.append(("top", value)),
+    )
+    monkeypatch.setattr(SC4PIMApp.UITheme, "appearance_mode", lambda: "dark")
+    monkeypatch.setattr(SC4PIMApp, "MainFrame", lambda: calls.append("frame") or frame)
+    monkeypatch.setattr(SC4PIMApp.wx, "CallAfter", lambda callback: calls.append(("after", callback)))
+
+    assert SC4PIMApp.App.OnInit(app) is True
+    assert calls[0] == ("appearance", SC4PIMApp.wx.App.Appearance.Dark)
+
+
+def test_appearance_mode_defaults_to_system(monkeypatch):
+    monkeypatch.setattr(UITheme.config, "load_settings", lambda: {})
+
+    assert UITheme.appearance_mode() == "system"
+
+
+def test_appearance_mode_reads_override(monkeypatch):
+    monkeypatch.setattr(UITheme.config, "load_settings", lambda: {"Appearance": "Dark"})
+
+    assert UITheme.appearance_mode() == "dark"
+
+
+def test_is_dark_honours_light_override(monkeypatch):
+    monkeypatch.setattr(UITheme, "appearance_mode", lambda: "light")
+
+    assert UITheme.is_dark() is False
+
+
+def test_is_dark_honours_dark_override(monkeypatch):
+    monkeypatch.setattr(UITheme, "appearance_mode", lambda: "dark")
+
+    assert UITheme.is_dark() is True
 
 
 def test_property_table_dark_colours_are_muted(monkeypatch):

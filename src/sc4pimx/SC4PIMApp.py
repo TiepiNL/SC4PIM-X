@@ -49,6 +49,7 @@ from .settings import *
 from .TablerIcons import dialog_button, dialog_button_sizer, icon_bitmap, icon_button, set_button_icon
 from .textutil import decode_sc4_string_prop, decode_sc4_text, decode_unicode_escape, encode_sc4_text
 from .translation import *
+from . import UITheme
 from .UITheme import alternating_list_colours, property_table_colours
 from .util import DictWrapper, basic_cmp, clamp_to_tile
 from .version import get_version
@@ -5502,6 +5503,20 @@ class MainFrame(wx.Frame):
             item.Check(code == selected_language)
             self.Bind(wx.EVT_MENU, self.OnSelectLanguage, id=int(item_id))
         menu1.AppendSubMenu(self.languageMenu, languageMenuLabel)
+        self.appearanceMenu = wx.Menu()
+        self._appearance_menu_modes = {}
+        selected_appearance = UITheme.appearance_mode()
+        for mode, label in (
+            ('system', appearanceSystemLabel),
+            ('light', appearanceLightLabel),
+            ('dark', appearanceDarkLabel),
+        ):
+            item_id = wx.NewIdRef()
+            item = self.appearanceMenu.AppendRadioItem(item_id, label)
+            self._appearance_menu_modes[int(item_id)] = mode
+            item.Check(mode == selected_appearance)
+            self.Bind(wx.EVT_MENU, self.OnSelectAppearance, id=int(item_id))
+        menu1.AppendSubMenu(self.appearanceMenu, appearanceMenuLabel)
         menu1.AppendSeparator()
         menu1.Append(104, menuItem1_1)
         menuBar.Append(menu1, menuItem1)
@@ -5741,6 +5756,19 @@ class MainFrame(wx.Frame):
             return
         config.save_language(code)
         dlg = wx.MessageDialog(self, languageRestartMessage, languageMenuLabel,
+                               wx.OK | wx.ICON_INFORMATION)
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def OnSelectAppearance(self, event):
+        mode = self._appearance_menu_modes.get(event.GetId())
+        if mode is None:
+            return
+        current = UITheme.appearance_mode()
+        if mode == current:
+            return
+        config.save_appearance(mode)
+        dlg = wx.MessageDialog(self, appearanceRestartMessage, appearanceMenuLabel,
                                wx.OK | wx.ICON_INFORMATION)
         dlg.ShowModal()
         dlg.Destroy()
@@ -6666,7 +6694,11 @@ class MainFrame(wx.Frame):
 class App(wx.App):
 
     def OnInit(self):
-        appearance_result = self.SetAppearance(wx.App.Appearance.System)
+        appearance = {
+            'light': wx.App.Appearance.Light,
+            'dark': wx.App.Appearance.Dark,
+        }.get(UITheme.appearance_mode(), wx.App.Appearance.System)
+        appearance_result = self.SetAppearance(appearance)
         if appearance_result != wx.App.AppearanceResult.Ok:
             logger.warning("Unable to enable the system application appearance: %s", appearance_result)
         frame = MainFrame()

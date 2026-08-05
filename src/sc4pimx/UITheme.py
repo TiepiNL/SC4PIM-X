@@ -9,9 +9,27 @@ from __future__ import annotations
 
 import wx
 
+from . import config
+
+APPEARANCE_MODES = ("system", "light", "dark")
+
+
+def appearance_mode() -> str:
+    """Return the configured appearance override, or 'system' if unset/invalid."""
+    mode = str(config.load_settings().get("Appearance", "system")).lower()
+    return mode if mode in APPEARANCE_MODES else "system"
+
 
 def is_dark() -> bool:
-    """Return whether wxWidgets is currently using a dark appearance."""
+    """Return whether the app should currently render with a dark appearance.
+
+    Honours a user-configured override before falling back to the OS setting.
+    """
+    mode = appearance_mode()
+    if mode == "dark":
+        return True
+    if mode == "light":
+        return False
     return bool(wx.SystemSettings.GetAppearance().IsDark())
 
 
