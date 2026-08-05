@@ -853,6 +853,7 @@ class LotEditorWin(wx.Frame):
         for icon, label, mode, handler, hint in [
             ("hand-move", LEXPAN, MODE_EDIT_PAN, self.OnModePan, "H"),
             ("cube", LEXProps, MODE_EDIT_PROP, self.OnModeProp, "P"),
+            ("building-community", LEXBuilding, MODE_EDIT_BUILDING, self.OnModeBuilding, "B"),
             ("texture", LEXBaseTexture, MODE_EDIT_BASETEX, self.OnModeBaseTex, "T"),
             ("layers-intersect", LEXOverlayTexture, MODE_EDIT_OVERTEX, self.OnModeOverTex, "V"),
             ("trees", LEXFlora, MODE_EDIT_FLORA, self.OnModeFlora, "F"),
@@ -908,7 +909,7 @@ class LotEditorWin(wx.Frame):
 
         self.contextMenuBtn, self.contextMenuHolder = self._make_context_button(
             command_bar,
-            "building-community",
+            "pin",
             "%s\n%s" % (LEXContextMenu, LEXContextMenuHint),
             self.OnCityContextMenu,
         )
