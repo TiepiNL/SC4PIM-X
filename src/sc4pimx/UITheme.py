@@ -9,9 +9,42 @@ from __future__ import annotations
 
 import wx
 
+from . import config
+
+APPEARANCE_MODES = ("system", "light", "dark")
+_appearance_mode_cache: str | None = None
+
+
+def appearance_mode() -> str:
+    """Return the configured appearance override, or 'system' if unset/invalid.
+
+    Cached: this reads config.toml, and is_dark() calls it on every owner-drawn
+    paint. GetAppearance() below is a cheap native call (~0.5us) and stays
+    uncached so a live OS theme switch is still picked up without a restart.
+    """
+    global _appearance_mode_cache
+    if _appearance_mode_cache is None:
+        mode = str(config.load_settings().get("Appearance", "system")).lower()
+        _appearance_mode_cache = mode if mode in APPEARANCE_MODES else "system"
+    return _appearance_mode_cache
+
+
+def reset_appearance_cache() -> None:
+    """Clear the cached appearance mode, primarily for tests and app reinitialization."""
+    global _appearance_mode_cache
+    _appearance_mode_cache = None
+
 
 def is_dark() -> bool:
-    """Return whether wxWidgets is currently using a dark appearance."""
+    """Return whether the app should currently render with a dark appearance.
+
+    Honours a user-configured override before falling back to the OS setting.
+    """
+    mode = appearance_mode()
+    if mode == "dark":
+        return True
+    if mode == "light":
+        return False
     return bool(wx.SystemSettings.GetAppearance().IsDark())
 
 
@@ -43,6 +76,21 @@ def asset_card_colours(selected: bool) -> tuple[wx.Colour, wx.Colour, wx.Colour]
         select((209, 214, 219), (75, 80, 86)),
         wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT),
     )
+
+
+def unsaved_highlight_colour() -> wx.Colour:
+    """Background for a save control with unsaved changes pending."""
+    return select((255, 213, 128), (109, 76, 24))
+
+
+class UnsavedChangesButton(wx.Button):
+    """Save button that shows an accent background while there is work to save."""
+
+    def Enable(self, enable=True):
+        changed = super().Enable(enable)
+        self.SetBackgroundColour(unsaved_highlight_colour() if enable else wx.NullColour)
+        self.Refresh()
+        return changed
 
 
 def alternating_list_colours() -> tuple[wx.Colour, wx.Colour]:

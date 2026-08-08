@@ -38,6 +38,29 @@ def test_save_startup_preference_preserves_existing_config(monkeypatch, tmp_path
     assert saved["Startup"]["ShowFileConfigurationAtStartup"] is False
 
 
+def test_confirm_exit_defaults_to_enabled(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[Paths]\nUserPluginsRoot = 'C:\\Plugins'\n", encoding="utf-8")
+    monkeypatch.setattr(config, "config_path", lambda: path)
+
+    assert config.confirm_exit_enabled() is True
+
+
+def test_save_confirm_exit_round_trips(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[Paths]\nUserPluginsRoot = 'C:\\Plugins'\n", encoding="utf-8")
+    monkeypatch.setattr(config, "config_path", lambda: path)
+    monkeypatch.setattr(config, "ensure_user_data_dir", lambda: tmp_path)
+
+    config.save_confirm_exit(False)
+
+    assert config.confirm_exit_enabled() is False
+    with open(path, "rb") as fh:
+        saved = tomllib.load(fh)
+    assert saved["ConfirmExit"] is False
+    assert saved["Paths"]["UserPluginsRoot"] == "C:\\Plugins"
+
+
 def test_save_language_preserves_existing_config(monkeypatch, tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[Paths]\nUserPluginsRoot = 'C:\\Plugins'\n", encoding="utf-8")

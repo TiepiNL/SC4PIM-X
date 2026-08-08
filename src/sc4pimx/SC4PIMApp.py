@@ -49,6 +49,7 @@ from .settings import *
 from .TablerIcons import dialog_button, dialog_button_sizer, icon_bitmap, icon_button, set_button_icon
 from .textutil import decode_sc4_string_prop, decode_sc4_text, decode_unicode_escape, encode_sc4_text
 from .translation import *
+from . import UITheme
 from .UITheme import alternating_list_colours, property_table_colours
 from .util import DictWrapper, basic_cmp, clamp_to_tile
 from .version import get_version
@@ -2555,7 +2556,7 @@ class NoteBookPanel(wx.Panel):
         self.bClose = wx.Button(self, -1, propertyPageClose)
         set_button_icon(self.bClose, "x")
         self.Bind(wx.EVT_BUTTON, self.parent.OnCloseTab, self.bClose)
-        self.bSave = wx.Button(self, -1, propertyPageSave)
+        self.bSave = UITheme.UnsavedChangesButton(self, -1, propertyPageSave)
         set_button_icon(self.bSave, "device-floppy")
         self.bSave.Enable(False)
         self.Bind(wx.EVT_BUTTON, self.OnSaveTab, self.bSave)
@@ -2882,6 +2883,11 @@ class NoteBookPanel(wx.Panel):
         dlg.Destroy()
         return False
 
+    def MarkDirty(self):
+        """Keep the tab save action available after in-editor mutations."""
+        self.exemplar.modified = True
+        self.bSave.Enable(True)
+
     def OnAddToFamily(self, event):
         title = 'Add to family'
         value = ''
@@ -3150,7 +3156,7 @@ class NoteBookPanel(wx.Panel):
                                    wx.OK | wx.ICON_INFORMATION)
             dlg.ShowModal()
             dlg.Destroy()
-            return
+            return False
         entries = self.virtual_dat.GetAllEntriesFromFile(fileName)
         nbrOfLots = 0
         lotName = ''
@@ -3176,7 +3182,7 @@ class NoteBookPanel(wx.Panel):
         WriteADat(fileName, entries, None, False)
         if b2Remove:
             os.remove(oldFileName)
-        return
+        return True
 
     def OnSaveTab(self, event):
         filename = self.exemplar.entry.fileName
@@ -3190,7 +3196,9 @@ class NoteBookPanel(wx.Panel):
             dlg.Destroy()
             return
         self.exemplar.Maj()
-        self.InternalSave(self.exemplar.entry.fileName)
+        if not self.InternalSave(self.exemplar.entry.fileName):
+            return
+        self.exemplar.modified = False
         self.bSave.Enable(False)
         IID = self.exemplar.entry.tgi[2]
         texEntry = self.virtual_dat.getEntry(2238569388, 1782082854, IID)
@@ -5502,6 +5510,23 @@ class MainFrame(wx.Frame):
             item.Check(code == selected_language)
             self.Bind(wx.EVT_MENU, self.OnSelectLanguage, id=int(item_id))
         menu1.AppendSubMenu(self.languageMenu, languageMenuLabel)
+        self.appearanceMenu = wx.Menu()
+        self._appearance_menu_modes = {}
+        selected_appearance = UITheme.appearance_mode()
+        for mode, label in (
+            ('system', appearanceSystemLabel),
+            ('light', appearanceLightLabel),
+            ('dark', appearanceDarkLabel),
+        ):
+            item_id = wx.NewIdRef()
+            item = self.appearanceMenu.AppendRadioItem(item_id, label)
+            self._appearance_menu_modes[int(item_id)] = mode
+            item.Check(mode == selected_appearance)
+            self.Bind(wx.EVT_MENU, self.OnSelectAppearance, id=int(item_id))
+        menu1.AppendSubMenu(self.appearanceMenu, appearanceMenuLabel)
+        self.confirmExitMenuItem = menu1.AppendCheckItem(wx.ID_ANY, menuConfirmExit)
+        self.confirmExitMenuItem.Check(config.confirm_exit_enabled())
+        self.Bind(wx.EVT_MENU, self.OnToggleConfirmExit, self.confirmExitMenuItem)
         menu1.AppendSeparator()
         menu1.Append(104, menuItem1_1)
         menuBar.Append(menu1, menuItem1)
@@ -5681,13 +5706,31 @@ class MainFrame(wx.Frame):
             return
         self.LoadDatas()
 
+    def OnToggleConfirmExit(self, event):
+        config.save_confirm_exit(self.confirmExitMenuItem.IsChecked())
+
+    def _has_unsaved_tabs(self):
+        for index in range(self.nb.GetPageCount()):
+            page = self.nb.GetPage(index)
+            if getattr(getattr(page, 'exemplar', None), 'modified', False):
+                return True
+        return False
+
     def OnCloseWindow(self, event):
-        dlg = wx.MessageDialog(self, quitMsg, appTitle, wx.YES_NO | wx.YES_DEFAULT | wx.ICON_INFORMATION)
-        res = dlg.ShowModal()
-        dlg.Destroy()
-        if res == wx.ID_NO:
-            event.Veto()
-            return
+        if config.confirm_exit_enabled():
+            msg = quitMsg
+        elif self._has_unsaved_tabs():
+            # Unsaved work still warns even with the routine prompt turned off.
+            msg = quitUnsavedMsg
+        else:
+            msg = None
+        if msg is not None:
+            dlg = wx.MessageDialog(self, msg, appTitle, wx.YES_NO | wx.YES_DEFAULT | wx.ICON_INFORMATION)
+            res = dlg.ShowModal()
+            dlg.Destroy()
+            if res == wx.ID_NO:
+                event.Veto()
+                return
         self._save_main_window_state()
         self.Destroy()
         sys.exit(0)
@@ -5741,6 +5784,19 @@ class MainFrame(wx.Frame):
             return
         config.save_language(code)
         dlg = wx.MessageDialog(self, languageRestartMessage, languageMenuLabel,
+                               wx.OK | wx.ICON_INFORMATION)
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def OnSelectAppearance(self, event):
+        mode = self._appearance_menu_modes.get(event.GetId())
+        if mode is None:
+            return
+        current = UITheme.appearance_mode()
+        if mode == current:
+            return
+        config.save_appearance(mode)
+        dlg = wx.MessageDialog(self, appearanceRestartMessage, appearanceMenuLabel,
                                wx.OK | wx.ICON_INFORMATION)
         dlg.ShowModal()
         dlg.Destroy()
@@ -6666,7 +6722,11 @@ class MainFrame(wx.Frame):
 class App(wx.App):
 
     def OnInit(self):
-        appearance_result = self.SetAppearance(wx.App.Appearance.System)
+        appearance = {
+            'light': wx.App.Appearance.Light,
+            'dark': wx.App.Appearance.Dark,
+        }.get(UITheme.appearance_mode(), wx.App.Appearance.System)
+        appearance_result = self.SetAppearance(appearance)
         if appearance_result != wx.App.AppearanceResult.Ok:
             logger.warning("Unable to enable the system application appearance: %s", appearance_result)
         frame = MainFrame()

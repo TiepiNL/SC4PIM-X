@@ -573,7 +573,8 @@ def test_atc_billboards_are_depth_tested_without_writing_depth(monkeypatch):
     atc = preview.ATC(None, None)
     atc.draw_le = lambda *_args: True
     calls = []
-    atc.DrawGL = lambda *_args: calls.append(("draw", ()))
+    drawn_models = []
+    atc.DrawGL = lambda *_args: (calls.append(("draw", ())), drawn_models.append(_args[-1]))
     for name in ("glDepthFunc", "glDepthMask", "glDisable", "glEnable"):
         monkeypatch.setattr(preview, name, lambda *args, name=name: calls.append((name, args)))
 
@@ -594,9 +595,26 @@ def test_atc_billboards_are_depth_tested_without_writing_depth(monkeypatch):
     assert ("glDepthMask", (preview.GL_TRUE,)) in calls[draw_index + 1 :]
     assert ("glDisable", (preview.GL_BLEND,)) in calls[draw_index + 1 :]
     assert ("glDisable", (preview.GL_DEPTH_TEST,)) not in calls
+    scale = preview.LotEditorWin.atc_world_scale(4)
+    assert drawn_models[0][0, 0] == pytest.approx(scale)
+    assert drawn_models[0][1, 1] == pytest.approx(scale)
+    assert drawn_models[0][2, 2] == pytest.approx(-scale)
     assert preview._atc_anchor_depth(numpy.identity(4), 0, 0, 5) > preview._atc_anchor_depth(
         numpy.identity(4), 0, 0, -5
     )
+
+
+def test_atc_world_scale_matches_tile_pixel_density_per_zoom():
+    import sc4pimx.SC4LotPreview as preview
+
+    # 16 m tile spans 8<<zoom sprite pixels: 8, 16, 32, 64, 128.
+    assert [preview.LotEditorWin.atc_world_scale(z) for z in range(5)] == [
+        2.0,
+        1.0,
+        0.5,
+        0.25,
+        0.125,
+    ]
 
 
 def test_s3d_shadow_projector_includes_sc4_quarter_turn():

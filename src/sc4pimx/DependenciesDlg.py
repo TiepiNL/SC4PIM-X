@@ -976,6 +976,18 @@ class DependenciesDlg(sc.SizedDialog):
         except Exception:
             return ""
 
+    def _find_exemplar_entry_by_iid(self, iid):
+        """Exemplar entry with this instance ID, searched across all groups.
+
+        Effect props and other system exemplars live under Maxis's lot-system
+        group (0xC977C536) rather than the prop/flora groups, so they are never
+        in the categories consulted first -- but they are loaded and valid.
+        """
+        for entry in self.virtualDAT.allEntries:
+            if entry.tgi[0] == 1697917002 and entry.tgi[2] == iid:
+                return entry
+        return None
+
     def AddBuildingOrProp(self, group, desc):
         referenced_by = "%s: %s" % (group, desc.name)
         if group == DepDlgProps:
@@ -1156,8 +1168,13 @@ class DependenciesDlg(sc.SizedDialog):
                             self.AddBuildingOrProp(DepDlgProps, desc)
                             added = True
                     if not added:
-                        self.AddMissingRow("Prop", "", _hex32(prop_id), DepDlgProps,
-                                           iid=prop_id, catalog_category="Prop")
+                        entry = self._find_exemplar_entry_by_iid(prop_id)
+                        if entry is not None:
+                            self.AddFoundRow("Prop", "", _hex32(prop_id), entry.fileName,
+                                             DepDlgProps, tgi=entry.tgi)
+                        else:
+                            self.AddMissingRow("Prop", "", _hex32(prop_id), DepDlgProps,
+                                               iid=prop_id, catalog_category="Prop")
 
             if values[0] == 2:
                 tex_id = values[12]
@@ -1183,8 +1200,13 @@ class DependenciesDlg(sc.SizedDialog):
                         self.AddBuildingOrProp(DepDlgFlora, desc)
                         added = True
                     if not added:
-                        self.AddMissingRow("Flora", "", _hex32(flora_id), DepDlgFlora,
-                                           iid=flora_id, catalog_category="Flora")
+                        entry = self._find_exemplar_entry_by_iid(flora_id)
+                        if entry is not None:
+                            self.AddFoundRow("Flora", "", _hex32(flora_id), entry.fileName,
+                                             DepDlgFlora, tgi=entry.tgi)
+                        else:
+                            self.AddMissingRow("Flora", "", _hex32(flora_id), DepDlgFlora,
+                                               iid=flora_id, catalog_category="Flora")
 
             if values[0] == 7:
                 if len(values) <= 15:

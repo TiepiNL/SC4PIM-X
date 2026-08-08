@@ -50,6 +50,10 @@ class VirtualDat(object):
         self.overTexEntries = []
         self.baseTexEntriesDict = {}
         self.overTexEntriesDict = {}
+        # Populated by the background FSH loader. The asset browser uses
+        # this metadata to draw crisp badges without decoding textures while
+        # painting or scrolling.
+        self.textureLayerCounts = {}
         self.s3dEntries = {}
         self.allTextures = []
         self.allEntries = []

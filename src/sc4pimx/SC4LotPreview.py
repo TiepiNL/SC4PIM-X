@@ -663,6 +663,16 @@ class LotEditorWin(wx.Frame):
     zoomScale = [1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1.0 / 2.0, 1, 2, 4, 8]
     zoomScale3D = [1 / 32.0, 1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1.0 / 2.0, 1, 2, 4]
     zoomScaleATC = [1 / 64.0, 1.0 / 32.0, 1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1 / 2.0, 1, 2]
+    @staticmethod
+    def atc_world_scale(zoom):
+        """Metres per sprite pixel for the ATC variant at this asset zoom.
+
+        ATC/AVP frames are pixel art authored per zoom level; a 16 m tile
+        spans 8<<zoom pixels (8 at zoom 0 up to 128 at zoom 4), so the
+        conversion halves with every zoom step. A fixed constant only ever
+        matched one zoom and left Sims tiny at every other one.
+        """
+        return 16.0 / (8 << zoom)
 
     def __init__(self, parent, ID, title, size):
         wx.Frame.__init__(self, parent, ID, title, size=size, style=wx.DEFAULT_FRAME_STYLE)
@@ -853,6 +863,7 @@ class LotEditorWin(wx.Frame):
         for icon, label, mode, handler, hint in [
             ("hand-move", LEXPAN, MODE_EDIT_PAN, self.OnModePan, "H"),
             ("cube", LEXProps, MODE_EDIT_PROP, self.OnModeProp, "P"),
+            ("building-community", LEXBuilding, MODE_EDIT_BUILDING, self.OnModeBuilding, "B"),
             ("texture", LEXBaseTexture, MODE_EDIT_BASETEX, self.OnModeBaseTex, "T"),
             ("layers-intersect", LEXOverlayTexture, MODE_EDIT_OVERTEX, self.OnModeOverTex, "V"),
             ("trees", LEXFlora, MODE_EDIT_FLORA, self.OnModeFlora, "F"),
@@ -908,7 +919,7 @@ class LotEditorWin(wx.Frame):
 
         self.contextMenuBtn, self.contextMenuHolder = self._make_context_button(
             command_bar,
-            "building-community",
+            "pin",
             "%s\n%s" % (LEXContextMenu, LEXContextMenuHint),
             self.OnCityContextMenu,
         )
@@ -971,6 +982,9 @@ class LotEditorWin(wx.Frame):
         command_sizer.Add(self.redoButton, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         self.undoButton.Disable()
         self.redoButton.Disable()
+
+        save_btn = self._make_toolbar_button(command_bar, "device-floppy", LEXToolbarSave, self.OnSaveLot)
+        command_sizer.Add(save_btn, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
 
         command_bar.SetSizer(command_sizer)
         root.Add(command_bar, 0, wx.EXPAND)
@@ -1715,6 +1729,10 @@ class LotEditorWin(wx.Frame):
 
     def DrawCityContextAmbient(self):
         """Draw moving traffic and pedestrians as a separate dynamic batch."""
+        # Drop the previous frame's actors first: the shadow pass reads
+        # _context_ambient_mesh, and a stale mesh would keep casting shadows
+        # for actors that are no longer drawn (gated off below).
+        self._context_ambient_mesh = None
         if (
             self._icon_render
             or self._context_scene is None
@@ -1757,7 +1775,11 @@ class LotEditorWin(wx.Frame):
         renderer = self.glCanvas2D.renderer.primitives
         fade = self._context_fade(shadow=True)
         renderer.draw_interleaved(GL_TRIANGLES, self._context_mesh.shadow_vertices, mvp, fade=fade)
-        if self.zoom3D >= 2:
+        # Detail and actor shadows follow the same visibility gates as their
+        # geometry (see DrawCityContext / DrawCityContextAmbient), so a caster
+        # never casts while its body is not drawn.
+        detail_threshold = {"low": 3, "medium": 2, "high": 1}.get(self.contextDetail, 2)
+        if self.zoom3D >= detail_threshold:
             renderer.draw_interleaved(GL_TRIANGLES, self._context_mesh.detail_shadow_vertices, mvp, fade=fade)
             ambient = getattr(self, "_context_ambient_mesh", None)
             if ambient is not None and len(ambient.shadow_vertices):
@@ -5747,7 +5769,8 @@ class LotEditorWin(wx.Frame):
                 if what.draw_le(zoom, rotMapping[rot]):
                     billboard = render.model.copy()
                     billboard[0:3, 0:3] = numpy.diag((1.0, 1.0, -1.0))
-                    billboard = billboard @ SC4Matrix.scale(1 / 14.0, 1 / 14.0, 1 / 14.0)
+                    scale = LotEditorWin.atc_world_scale(zoom)
+                    billboard = billboard @ SC4Matrix.scale(scale, scale, scale)
                     what.DrawGL(
                         self.s3DTexturesHolder,
                         self.glCanvas2D.renderer,
@@ -5758,6 +5781,17 @@ class LotEditorWin(wx.Frame):
                 glDepthMask(GL_TRUE)
                 glDisable(GL_BLEND)
         return
+
+    @staticmethod
+    def _viewer_casts_shadow(viewer):
+        """Whether any of the viewer's states has S3D geometry to project.
+
+        ATC billboards are skipped as casters (no planar silhouette), but a
+        mixed-state prop (e.g. ATC animation with an S3D dormant state) must
+        still enter the pass; DrawModel resolves the active state and the ATC
+        member is a no-op there. Checking only state 0 dropped those shadows.
+        """
+        return any(what.__class__ != ATC for what in viewer.viewingData)
 
     def _draw_shadow_pass(self, rot2D, rotation, rotMapping, assetZoom, viewZoom, lotSizeXOver, lotSizeYOver):
         """Stencil a union of projected casters, then darken it exactly once."""
@@ -5823,7 +5857,7 @@ class LotEditorWin(wx.Frame):
                         continue
                     if not self._viewer_is_temporally_active(propViewer):
                         continue
-                    if propViewer.viewingData[0].__class__ == ATC:
+                    if not self._viewer_casts_shadow(propViewer):
                         continue
                     cast(prop, propViewer)
             if self._is_layer_visible("3d", LAYER_FLORA):
@@ -5832,7 +5866,7 @@ class LotEditorWin(wx.Frame):
                         continue
                     if not self._viewer_is_temporally_active(floraViewer):
                         continue
-                    if floraViewer.viewingData[0].__class__ == ATC:
+                    if not self._viewer_casts_shadow(floraViewer):
                         continue
                     cast(flora, floraViewer)
             self._flush_shadow_batches(shadow_batches)
@@ -6656,11 +6690,15 @@ class LotEditorWin(wx.Frame):
         self.UpdateSelectionInspector()
         return
 
+    def OnSaveLot(self, event):
+        self.descPage.OnSaveTab(None)
+
     def UpdatePIM(self):
         self.descPage.listProperties.Freeze()
         self.descPage.listProperties.DeleteAllItems()
         self.descPage.FillTheList()
         self.descPage.listProperties.Thaw()
+        self.descPage.MarkDirty()
 
 
 class LotCreatorDlg(sc.SizedDialog):

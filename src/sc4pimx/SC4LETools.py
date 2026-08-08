@@ -14,6 +14,17 @@ logger = logging.getLogger(__name__)
 
 # Sentinel for "not yet resolved" caches (distinct from a resolved None).
 _UNSET = object()
+MULTI_FSH_LABEL = "Multi"
+TEXTURE_STRIP_TILE_SIZE = 96
+TEXTURE_WEALTH_LABELS = {0x0000: "0", 0x1000: "$", 0x2000: "$$", 0x3000: "$$$"}
+
+# Corner-dot badge colours for prop/flora behaviours; matches P&P's palette.
+BEHAVIOR_DOT_COLOURS = {
+    "day_night": (0x63, 0x66, 0xF1),   # indigo
+    "timed": (0xF5, 0x9E, 0x0B),       # amber
+    "seasonal": (0x10, 0xB9, 0x81),    # emerald
+    "chance": (0xF4, 0x3F, 0x5E),      # rose
+}
 
 # Thumbnail decoding happens on the GUI thread because it creates wx.Bitmap
 # objects. Process as much as fits in a short slice, then let wx service input
@@ -786,16 +797,16 @@ class LEAssetItem(object):
                 result = []
                 nighttime = ex.GetProp(0x49c9c93c)
                 if nighttime and nighttime[0]:
-                    result.append((0x63, 0x66, 0xF1))    # Day/Night - indigo
+                    result.append(BEHAVIOR_DOT_COLOURS["day_night"])
                 tod = ex.GetProp(0x4a149631)
                 if tod and len(tod) >= 2:
-                    result.append((0xF5, 0x9E, 0x0B))    # Timed - amber
+                    result.append(BEHAVIOR_DOT_COLOURS["timed"])
                 if (ex.GetProp(0xca7515cc) or ex.GetProp(0x4a764564) or
                         ex.GetProp(0x0a751675)):
-                    result.append((0x10, 0xB9, 0x81))    # Seasonal - emerald
+                    result.append(BEHAVIOR_DOT_COLOURS["seasonal"])
                 rc = ex.GetProp(0x4a751ad5)
                 if rc and rc[0] < 100:
-                    result.append((0xF4, 0x3F, 0x5E))    # Random chance - rose
+                    result.append(BEHAVIOR_DOT_COLOURS["chance"])
                 flags = tuple(result)
             except Exception:
                 flags = ()
@@ -816,6 +827,14 @@ class LEAssetThumbnailProvider(object):
         self.cache = {}
         self.state_counts = {}
         self.state_strips = {}
+        # Decoded FSH layers are loaded lazily when a texture is hovered. Keep
+        # the decoded PIL images so the hover strip does not read/decode the
+        # package entry twice.
+        self.texture_layers = {}
+        # Layer counts are cheap metadata produced by the background texture
+        # loader. This lets card painting identify MultiFSHs without opening
+        # or decoding package entries on the scroll path.
+        self.texture_layer_counts = {}
         # Animated-prop GIF frames, keyed by (gif_path, thumb_size) -> list of
         # thumb-sized wx.Bitmaps. An empty list caches a known failure so a
         # broken GIF isn't reopened every repaint.
@@ -926,6 +945,93 @@ class LEAssetThumbnailProvider(object):
         image = image.Scale(size[0], size[1], wx.IMAGE_QUALITY_HIGH)
         return image.ConvertToBitmap()
 
+    @staticmethod
+    def _texture_entry_key(entry):
+        try:
+            tgi = tuple(entry.tgi)
+        except Exception:
+            tgi = ()
+        return (getattr(entry, 'fileName', ''), tgi, id(entry) if not tgi else None)
+
+    def _cache_texture_layer_count(self, key, count):
+        cache = getattr(self, 'texture_layer_counts', None)
+        if cache is None:
+            cache = {}
+            self.texture_layer_counts = cache
+        cache[key] = count
+
+    def _texture_layer_images(self, entry, include_all=True):
+        """Return ``(layer_count, PIL images)`` for one FSH entry.
+
+        FSHConverter concatenates every equal-sized FSH element in its image
+        and alpha buffers. The first image is the normal thumbnail; the
+        remaining images are the MultiFSH layers shown by the hover popup.
+
+        Thumbnail fallback only needs the first image. Avoid creating PIL
+        objects for every layer while scrolling; the complete layer list is
+        decoded and cached when the hover popup asks for it.
+        """
+        key = self._texture_entry_key(entry)
+        if include_all and key in self.texture_layers:
+            result = self.texture_layers[key]
+            self._cache_texture_layer_count(key, result[0])
+            return result
+        images = []
+        layer_count = 0
+        try:
+            entry.read_file(None, True, True)
+            nbr_layers, true_alpha, img, alpha, size = FSHConverter.decodeFSH(entry.content)
+            layer_count = max(1, int(nbr_layers))
+            pixels = size[0] * size[1]
+            rgb_stride = pixels * 3
+            alpha_stride = pixels
+            layer_limit = layer_count if include_all else 1
+            for layer_idx in range(layer_limit):
+                rgb_start = layer_idx * rgb_stride
+                rgb_end = rgb_start + rgb_stride
+                if rgb_end > len(img):
+                    break
+                pil = Image.frombytes('RGB', size, img[rgb_start:rgb_end])
+                if true_alpha:
+                    alpha_start = layer_idx * alpha_stride
+                    alpha_end = alpha_start + alpha_stride
+                    if alpha_end > len(alpha):
+                        break
+                    alpha_layer = Image.frombytes('L', size, alpha[alpha_start:alpha_end])
+                    pil = Image.composite(pil, Image.new('RGB', size, 0xFFFFFF), alpha_layer)
+                images.append(pil)
+        except Exception:
+            logger.debug('Failed to decode MultiFSH texture %s', getattr(entry, 'tgi', None), exc_info=True)
+        finally:
+            try:
+                entry.content = None
+                entry.rawContent = None
+            except Exception:
+                pass
+        result = (layer_count, tuple(images))
+        if layer_count:
+            self._cache_texture_layer_count(key, layer_count)
+        if include_all:
+            if len(self.texture_layers) >= 128:
+                self.texture_layers.pop(next(iter(self.texture_layers)))
+            self.texture_layers[key] = result
+        return result
+
+    def _known_texture_layer_count(self, entry):
+        key = self._texture_entry_key(entry)
+        count_cache = getattr(self, 'texture_layer_counts', {})
+        count = count_cache.get(key)
+        if count is not None:
+            return count
+        try:
+            count = VirtualDat.this.textureLayerCounts.get(entry)
+        except Exception:
+            count = None
+        if count is not None:
+            count = max(1, int(count))
+            self._cache_texture_layer_count(key, count)
+        return count
+
     def _texture_bitmap(self, entry, overlay):
         try:
             image_list = VirtualDat.this.ilOver if overlay else VirtualDat.this.ilBase
@@ -935,23 +1041,10 @@ class LEAssetThumbnailProvider(object):
                 return self._scale_bitmap(image_list.GetBitmap(idx))
         except Exception:
             pass
-        try:
-            entry.read_file(None, True, True)
-            nbrLayers, trueAlpha, img, alpha, size = FSHConverter.decodeFSH(entry.content)
-            pil = Image.frombytes('RGB', size, img[:size[0] * size[1] * 3])
-            if trueAlpha:
-                blank = Image.new('RGB', size, 16777215)
-                alpha_layer = Image.frombytes('L', size, alpha[:size[0] * size[1]])
-                pil = Image.composite(pil, blank, alpha_layer)
-            return self._bitmap_from_pil(pil)
-        except Exception:
+        _layer_count, images = self._texture_layer_images(entry, include_all=False)
+        if not images:
             return self._build_placeholder('!')
-        finally:
-            try:
-                entry.content = None
-                entry.rawContent = None
-            except Exception:
-                pass
+        return self._bitmap_from_pil(images[0])
 
     def _prop_bitmap(self, desc):
         try:
@@ -1024,6 +1117,51 @@ class LEAssetThumbnailProvider(object):
             self.state_strips[key] = BitmapFromPIL(full)
         return self.state_strips[key]
 
+    def TextureLayerCount(self, item, resolve=True):
+        if item.kind not in ('base texture', 'overlay texture') or item.source is None:
+            return 1
+        count = self._known_texture_layer_count(item.source)
+        if count is not None:
+            return count
+        if not resolve:
+            return 1
+        count, _images = self._texture_layer_images(item.source)
+        return max(1, count)
+
+    def IsMultiFSH(self, item, resolve=True):
+        return self.TextureLayerCount(item, resolve=resolve) > 1
+
+    def MultiLabel(self, item, resolve=True):
+        return MULTI_FSH_LABEL if self.IsMultiFSH(item, resolve=resolve) else None
+
+    def TextureWealthLabel(self, item):
+        if item.kind not in ('base texture', 'overlay texture') or item.source is None:
+            return None
+        try:
+            return TEXTURE_WEALTH_LABELS.get(int(item.source.tgi[2]) & 0xF000)
+        except Exception:
+            return None
+
+    def _texture_state_strip(self, item):
+        key = self._cache_key(item)
+        if key in self.state_strips:
+            return self.state_strips[key]
+        layer_count, images = self._texture_layer_images(item.source)
+        if layer_count <= 1:
+            return None
+        tile = TEXTURE_STRIP_TILE_SIZE
+        full = Image.new('RGB', (tile * layer_count, tile), 0xFFFFFF)
+        draw = ImageDraw.Draw(full)
+        for idx, image in enumerate(images):
+            thumb = image.copy()
+            thumb.thumbnail((tile - 8, tile - 8), Image.BICUBIC)
+            x = idx * tile + (tile - thumb.width) // 2
+            y = (tile - thumb.height) // 2
+            full.paste(thumb, (x, y))
+            draw.rectangle((idx * tile, 0, idx * tile + tile - 1, tile - 1), outline=(190, 195, 200))
+        self.state_strips[key] = BitmapFromPIL(full)
+        return self.state_strips[key]
+
     def StateCount(self, item):
         if item.kind not in ('prop', 'effect', 'flora', 'family') or item.source is None:
             return 1
@@ -1043,6 +1181,11 @@ class LEAssetThumbnailProvider(object):
         return self.state_counts.get(key, 1)
 
     def StateStrip(self, item):
+        if item.kind in ('base texture', 'overlay texture'):
+            try:
+                return self._texture_state_strip(item)
+            except Exception:
+                return None
         if self.StateCount(item) <= 1:
             return None
         try:
@@ -1325,6 +1468,24 @@ class LEAssetGrid(wx.ScrolledWindow):
         elif not self._any_anim and self._anim_timer.IsRunning():
             self._anim_timer.Stop()
 
+    def _draw_thumbnail_pill(self, dc, label, x, y, background, foreground):
+        """Draw one crisp, theme-aware metadata pill over a thumbnail."""
+        font = getattr(self, '_thumbnail_badge_font', None)
+        if font is None:
+            font = wx.Font(8, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL,
+                           wx.FONTWEIGHT_BOLD)
+            self._thumbnail_badge_font = font
+        dc.SetFont(font)
+        text_width, _text_height = dc.GetTextExtent(label)
+        height = 16 if self.THUMB < 72 else 18
+        width = text_width + 10
+        rect = wx.Rect(x, y, width, height)
+        dc.SetBrush(wx.Brush(background))
+        dc.SetPen(wx.Pen(background, 1))
+        dc.DrawRoundedRectangle(rect.x, rect.y, rect.width, rect.height, 5)
+        dc.SetTextForeground(foreground)
+        dc.DrawLabel(label, rect, wx.ALIGN_CENTER)
+
     def _draw_card(self, dc, idx, rect):
         item = self.items[idx]
         selected = idx == self.selected
@@ -1344,6 +1505,22 @@ class LEAssetGrid(wx.ScrolledWindow):
         tx = rect.x + (rect.width - self.THUMB) // 2
         ty = rect.y + 12
         dc.DrawBitmap(bmp, tx, ty, True)
+        if item.kind in ('base texture', 'overlay texture'):
+            multi_label = self.thumbnail_provider.MultiLabel(item, resolve=False)
+            if multi_label:
+                self._draw_thumbnail_pill(
+                    dc, multi_label, tx + 4, ty + 4,
+                    select((39, 120, 126), (50, 130, 137)),
+                    wx.Colour(255, 255, 255),
+                )
+            wealth_label = self.thumbnail_provider.TextureWealthLabel(item)
+            if wealth_label:
+                pill_height = 16 if self.THUMB < 72 else 18
+                self._draw_thumbnail_pill(
+                    dc, wealth_label, tx + 4, ty + self.THUMB - pill_height - 4,
+                    select((156, 181, 140), (88, 115, 75)),
+                    select((20, 36, 24), (255, 255, 255)),
+                )
         dots = item.behavior_dots
         if dots:
             radius = 4
@@ -1430,6 +1607,9 @@ class LEAssetGrid(wx.ScrolledWindow):
         ('pair', label, value) for a bold-label / plain-value two-column row.
         """
         rows = [('span', item.label, True), ('span', item.type_label, False)]
+        multi_label = self.thumbnail_provider.MultiLabel(item)
+        if multi_label:
+            rows.append(('span', multi_label, True))
         hex_id = getattr(item, 'hex_id', '')
         if hex_id and hex_id != item.label:
             rows.append(('span', '0x' + hex_id, False))
@@ -1489,18 +1669,21 @@ class LEAssetGrid(wx.ScrolledWindow):
                 bullet = '  - %s (0x%08X)' % (name, fid) if name else '  - 0x%08X' % fid
                 rows.append(('span', bullet, False))
 
-        parts = []
+        dot_rows = []
         if has_day_night:
-            parts.append(LEXTooltipDayNight)
+            dot_rows.append(('dot', BEHAVIOR_DOT_COLOURS['day_night'], LEXTooltipDayNight))
         if has_timed:
-            parts.append(LEXTooltipTimed)
+            dot_rows.append(('dot', BEHAVIOR_DOT_COLOURS['timed'], LEXTooltipTimed))
         if has_seasonal:
-            parts.append(LEXTooltipSeasonal)
+            dot_rows.append(('dot', BEHAVIOR_DOT_COLOURS['seasonal'], LEXTooltipSeasonal))
         if chance is not None and chance < 100:
-            parts.append('%d%%' % chance)
-        if not parts:
-            parts.append(LEXTooltipStatic)
-        rows.append(('pair', LEXTooltipBehavior + ':', ' + '.join(parts)))
+            dot_rows.append(('dot', BEHAVIOR_DOT_COLOURS['chance'],
+                             '%s %d%%' % (LEXTooltipSpawnChance, chance)))
+        if dot_rows:
+            rows.append(('span', LEXTooltipBehavior + ':', True))
+            rows.extend(dot_rows)
+        else:
+            rows.append(('pair', LEXTooltipBehavior + ':', LEXTooltipStatic))
 
         if has_timed:
             rows.append(('pair', LEXTooltipVisibleBetween + ':',
@@ -1594,6 +1777,14 @@ class LEAssetGrid(wx.ScrolledWindow):
                         f.SetWeight(wx.FONTWEIGHT_BOLD)
                         st.SetFont(f)
                     grid.Add(st, pos=(row_idx, 0), span=(1, 2), flag=wx.ALIGN_LEFT)
+                elif entry[0] == 'dot':
+                    _, colour, text = entry
+                    line = wx.BoxSizer(wx.HORIZONTAL)
+                    bullet = wx.StaticText(panel, -1, '●')
+                    bullet.SetForegroundColour(wx.Colour(*colour))
+                    line.Add(bullet, 0, wx.RIGHT, 4)
+                    line.Add(wx.StaticText(panel, -1, text), 0)
+                    grid.Add(line, pos=(row_idx, 0), span=(1, 2), flag=wx.ALIGN_LEFT)
                 else:  # 'pair'
                     _, label, value = entry
                     lab = wx.StaticText(panel, -1, label)
