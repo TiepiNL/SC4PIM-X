@@ -1051,7 +1051,8 @@ class IconDlg(wx.Dialog):
     def __init__(self, parent, img):
         wx.Dialog.__init__(self, parent, -1, IconDlgTitle, size=wx.Size(456, 157), style=wx.CAPTION)
         box_sizer1 = wx.BoxSizer(wx.VERTICAL)
-        file_browse = filebrowse.FileBrowseButton(self, -1, changeCallback=self.fbb_callback, labelText=IconDlgPicture)
+        file_browse = filebrowse.FileBrowseButton(self, -1, changeCallback=self.fbb_callback, labelText=IconDlgPicture,
+                                                  buttonText=IconDlgBrowse)
         box_sizer1.Add(file_browse, 0, wx.EXPAND, 5)
         self.bitmap1 = wx.StaticBitmap(self, wx.ID_ANY,
                                        wx.BitmapBundle(wx.Bitmap(str(asset_path('templates', 'IconTpl.png')))))
