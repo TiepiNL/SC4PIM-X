@@ -35,17 +35,7 @@ class DependencyCatalogClient:
             self.base_url,
             urlencode({"tgi": "0x%08X, 0x%08X, 0x%08X" % tuple(tgi)}),
         )
-        try:
-            with urlopen(query, timeout=self.timeout) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except (OSError, URLError, ValueError, json.JSONDecodeError):
-            logger.debug("Dependency catalog lookup failed for %r", tgi, exc_info=True)
-            return CatalogLookupResult("error", [])
-        value = _response_items(data)
-        if value is None:
-            return CatalogLookupResult("error", [])
-        matches = [item for item in value if isinstance(item, dict)]
-        return CatalogLookupResult("ok", matches)
+        return self._fetch_items(query, "TGI %r" % (tgi,))
 
     def search_iid(self, iid):
         if not self.enabled or not self.base_url or iid is None:
@@ -54,17 +44,27 @@ class DependencyCatalogClient:
             self.base_url,
             urlencode({"value": "0x%08X" % int(iid)}),
         )
-        try:
-            with urlopen(query, timeout=self.timeout) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except (OSError, URLError, ValueError, json.JSONDecodeError):
-            logger.debug("Dependency catalog IID lookup failed for %r", iid, exc_info=True)
-            return CatalogLookupResult("error", [])
-        value = _response_items(data)
-        if value is None:
-            return CatalogLookupResult("error", [])
-        matches = [item for item in value if isinstance(item, dict)]
-        return CatalogLookupResult("ok", matches)
+        return self._fetch_items(query, "IID %r" % (iid,))
+
+    def _fetch_items(self, query, describe):
+        # One retry: the catalog is a hosted service that cold-starts, so the
+        # first request after idle regularly exceeds a short timeout and would
+        # otherwise mark every row "Offline" for the whole run.
+        last_error = None
+        for _attempt in range(2):
+            try:
+                with urlopen(query, timeout=self.timeout) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+            except (OSError, URLError, ValueError, json.JSONDecodeError) as exc:
+                last_error = exc
+                continue
+            value = _response_items(data)
+            if value is None:
+                return CatalogLookupResult("error", [])
+            matches = [item for item in value if isinstance(item, dict)]
+            return CatalogLookupResult("ok", matches)
+        logger.warning("Dependency catalog lookup failed for %s: %s", describe, last_error)
+        return CatalogLookupResult("error", [])
 
 
 def format_catalog_match(match):
