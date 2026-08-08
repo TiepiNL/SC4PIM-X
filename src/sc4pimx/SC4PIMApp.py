@@ -2883,6 +2883,11 @@ class NoteBookPanel(wx.Panel):
         dlg.Destroy()
         return False
 
+    def MarkDirty(self):
+        """Keep the tab save action available after in-editor mutations."""
+        self.exemplar.modified = True
+        self.bSave.Enable(True)
+
     def OnAddToFamily(self, event):
         title = 'Add to family'
         value = ''
@@ -3151,7 +3156,7 @@ class NoteBookPanel(wx.Panel):
                                    wx.OK | wx.ICON_INFORMATION)
             dlg.ShowModal()
             dlg.Destroy()
-            return
+            return False
         entries = self.virtual_dat.GetAllEntriesFromFile(fileName)
         nbrOfLots = 0
         lotName = ''
@@ -3177,7 +3182,7 @@ class NoteBookPanel(wx.Panel):
         WriteADat(fileName, entries, None, False)
         if b2Remove:
             os.remove(oldFileName)
-        return
+        return True
 
     def OnSaveTab(self, event):
         filename = self.exemplar.entry.fileName
@@ -3191,7 +3196,9 @@ class NoteBookPanel(wx.Panel):
             dlg.Destroy()
             return
         self.exemplar.Maj()
-        self.InternalSave(self.exemplar.entry.fileName)
+        if not self.InternalSave(self.exemplar.entry.fileName):
+            return
+        self.exemplar.modified = False
         self.bSave.Enable(False)
         IID = self.exemplar.entry.tgi[2]
         texEntry = self.virtual_dat.getEntry(2238569388, 1782082854, IID)
