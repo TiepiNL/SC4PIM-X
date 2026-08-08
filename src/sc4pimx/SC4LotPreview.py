@@ -975,6 +975,9 @@ class LotEditorWin(wx.Frame):
         self.undoButton.Disable()
         self.redoButton.Disable()
 
+        save_btn = self._make_toolbar_button(command_bar, "device-floppy", LEXToolbarSave, self.OnSaveLot)
+        command_sizer.Add(save_btn, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+
         command_bar.SetSizer(command_sizer)
         root.Add(command_bar, 0, wx.EXPAND)
 
@@ -6659,6 +6662,9 @@ class LotEditorWin(wx.Frame):
         self.on_draw()
         self.UpdateSelectionInspector()
         return
+
+    def OnSaveLot(self, event):
+        self.descPage.OnSaveTab(None)
 
     def UpdatePIM(self):
         self.descPage.listProperties.Freeze()

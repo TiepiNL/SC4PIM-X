@@ -16,6 +16,16 @@ def test_mark_dirty_enables_save_and_marks_exemplar_modified():
     assert calls == [True]
 
 
+def test_lot_editor_save_button_delegates_to_the_parent_tab():
+    calls = []
+    editor = LotEditorWin.__new__(LotEditorWin)
+    editor.descPage = SimpleNamespace(OnSaveTab=lambda event: calls.append(event))
+
+    editor.OnSaveLot(None)
+
+    assert calls == [None]
+
+
 def test_lot_editor_refresh_marks_the_parent_tab_dirty():
     calls = []
     list_properties = SimpleNamespace(
