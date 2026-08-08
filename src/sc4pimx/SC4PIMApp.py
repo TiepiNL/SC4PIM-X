@@ -2556,7 +2556,7 @@ class NoteBookPanel(wx.Panel):
         self.bClose = wx.Button(self, -1, propertyPageClose)
         set_button_icon(self.bClose, "x")
         self.Bind(wx.EVT_BUTTON, self.parent.OnCloseTab, self.bClose)
-        self.bSave = wx.Button(self, -1, propertyPageSave)
+        self.bSave = UITheme.UnsavedChangesButton(self, -1, propertyPageSave)
         set_button_icon(self.bSave, "device-floppy")
         self.bSave.Enable(False)
         self.Bind(wx.EVT_BUTTON, self.OnSaveTab, self.bSave)

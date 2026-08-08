@@ -149,6 +149,18 @@ def test_property_table_dark_colours_are_muted(monkeypatch):
     assert all(colour.GetLuminance() < 0.38 for colour in colours.values())
 
 
+def test_unsaved_highlight_colour_is_muted_in_dark_mode(monkeypatch):
+    monkeypatch.setattr(UITheme, "is_dark", lambda: True)
+
+    assert UITheme.unsaved_highlight_colour().GetLuminance() < 0.38
+
+
+def test_unsaved_highlight_colour_is_bright_in_light_mode(monkeypatch):
+    monkeypatch.setattr(UITheme, "is_dark", lambda: False)
+
+    assert UITheme.unsaved_highlight_colour().GetLuminance() > 0.6
+
+
 def test_alternating_list_colours_have_dark_variants(monkeypatch):
     monkeypatch.setattr(UITheme, "is_dark", lambda: True)
 

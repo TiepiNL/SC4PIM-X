@@ -78,6 +78,21 @@ def asset_card_colours(selected: bool) -> tuple[wx.Colour, wx.Colour, wx.Colour]
     )
 
 
+def unsaved_highlight_colour() -> wx.Colour:
+    """Background for a save control with unsaved changes pending."""
+    return select((255, 213, 128), (109, 76, 24))
+
+
+class UnsavedChangesButton(wx.Button):
+    """Save button that shows an accent background while there is work to save."""
+
+    def Enable(self, enable=True):
+        changed = super().Enable(enable)
+        self.SetBackgroundColour(unsaved_highlight_colour() if enable else wx.NullColour)
+        self.Refresh()
+        return changed
+
+
 def alternating_list_colours() -> tuple[wx.Colour, wx.Colour]:
     """Return the two tinted backgrounds used by virtual exemplar lists."""
     return (
