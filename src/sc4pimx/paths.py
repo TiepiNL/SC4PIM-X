@@ -85,6 +85,16 @@ def image_db_path(name: str, large: bool = False) -> Path:
     return image_db_dir(large) / name
 
 
+def catalog_db_path() -> Path:
+    """Path to the downloaded SC4 Prop & Texture Catalog SQLite database.
+
+    Re-downloadable cache, so it lives beside the other per-user state rather
+    than in ``assets``; a missing file just means the next lookup falls back to
+    the online catalog API until the download runs.
+    """
+    return user_data_dir() / "Catalog.db"
+
+
 SC4PATH_THUMB_SIZE = (192, 128)
 
 

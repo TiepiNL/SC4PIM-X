@@ -226,3 +226,23 @@ def test_dependency_label_uses_typed_id_when_name_is_unknown_or_generic():
     assert row_display_label(texture_row) == "Textures: 0x7AB50E44"
     assert row_display_label(model_row) == "Models: 0x6534284A-0x5AD0E817-0x89ABCDEF"
     assert row_display_label(named_prop_row) == "Prop: Fire Occupant"
+
+
+def test_catalog_status_accepts_a_local_database_without_a_base_url():
+    row = DependencyRow(
+        id=1,
+        status="missing",
+        kind="Prop",
+        name="",
+        key="0x12345678",
+        source="not found",
+        referenced_by="Props",
+        iid=0x12345678,
+    )
+
+    assert identification_catalog_status(row, True, "", catalog_local=True) == "pending"
+    assert identification_catalog_status(row, True, "", catalog_local=False) == "disabled"
+    assert found_catalog_status("plugin.dat", (1, 2, 3), True, "", catalog_local=True) == "pending"
+    assert found_catalog_status("plugin.dat", (1, 2, 3), True, "", catalog_local=False) == "disabled"
+    # A built-in game file is still never looked up.
+    assert found_catalog_status("simcity_1.dat", (1, 2, 3), True, "", catalog_local=True) == "built_in"

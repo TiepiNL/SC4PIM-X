@@ -98,6 +98,16 @@ DEFAULT_DEPENDENCY_CATALOG = {
     "Enabled": False,
     "BaseUrl": "",
     "TimeoutSeconds": 15,
+    "IidBatchSize": 25,
+    # The catalog project publishes its whole dataset as a SQLite file, so
+    # lookups can run locally instead of one HTTP round-trip per resource.
+    "UseLocalDatabase": True,
+    "DatabaseUrl": (
+        "https://raw.githubusercontent.com/noah-severyn/SC4PropTextureCatalog"
+        "/main/SC4PropTextureCatalogAPI/data/Catalog.db"
+    ),
+    "RefreshIntervalDays": 14,
+    "DownloadTimeoutSeconds": 60,
 }
 
 DEFAULT_RENDERING = {

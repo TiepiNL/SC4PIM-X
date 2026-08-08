@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html as html_std
+import logging
 import os.path
 import threading
 import webbrowser
@@ -11,13 +12,15 @@ import wx.html
 import wx.lib.sized_controls as sc
 from wx.lib.agw import ultimatelistctrl as ULC
 
-from . import config
-from .DependencyCatalog import DependencyCatalogClient
+from . import catalog_db, config
+from .DependencyCatalog import CatalogLookupResult, DependencyCatalogClient
 from .SC4Data import *
 from .SC4DatTools import *
 from .SC4PathReader import SC4PATH_MODEL_GID, SC4PATH_TEXTURE_GID, SC4PATH_TYPE
 from .TablerIcons import dialog_button_sizer, icon_bitmap, set_button_icon
 from .translation import *
+
+logger = logging.getLogger(__name__)
 
 offsetGID = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 16, 17, 18, 19, 20, 35]
 
@@ -100,21 +103,21 @@ def is_builtin_game_file(file_name):
     return len(name) == len("simcity_1.dat") and name.startswith("simcity_") and name.endswith(".dat") and name[8] in "12345"
 
 
-def found_catalog_status(file_name, tgi, catalog_enabled, catalog_base_url):
+def found_catalog_status(file_name, tgi, catalog_enabled, catalog_base_url, catalog_local=False):
     if is_builtin_game_file(file_name):
         return "built_in"
     if tgi is not None:
-        return "pending" if catalog_enabled and catalog_base_url else "disabled"
+        return "pending" if catalog_enabled and (catalog_base_url or catalog_local) else "disabled"
     return "not_applicable"
 
 
-def identification_catalog_status(row, catalog_enabled, catalog_base_url):
+def identification_catalog_status(row, catalog_enabled, catalog_base_url, catalog_local=False):
     if row.status == "ignored" or not row.catalog_lookup:
         return "not_applicable"
     if row.status == "found":
-        return found_catalog_status(row.source, row.tgi, catalog_enabled, catalog_base_url)
+        return found_catalog_status(row.source, row.tgi, catalog_enabled, catalog_base_url, catalog_local)
     if row.status == "missing" and (row.tgi is not None or row.iid is not None):
-        return "pending" if catalog_enabled and catalog_base_url else "disabled"
+        return "pending" if catalog_enabled and (catalog_base_url or catalog_local) else "disabled"
     return "not_applicable"
 
 
@@ -426,22 +429,83 @@ def lookup_catalog(client, tgi=None, iid=None, catalog_category=None, allow_iid_
     return "disabled", [], ""
 
 
+def run_catalog_download(catalog_settings, cancel, progress_callback, done_callback):
+    """Download the catalog database, marshalling both callbacks onto the GUI."""
+    try:
+        status = catalog_db.download_database(
+            catalog_settings.get("DatabaseUrl") or None,
+            timeout=float(catalog_settings.get(
+                "DownloadTimeoutSeconds", catalog_db.DEFAULT_DOWNLOAD_TIMEOUT_SECONDS)),
+            progress=lambda phase, done, total: wx.CallAfter(
+                progress_callback, phase, done, total),
+            cancel=cancel,
+        )
+    except Exception:
+        logger.exception("Catalog database download failed unexpectedly")
+        status = "error"
+    wx.CallAfter(done_callback, status)
+
+
+CATALOG_POST_BATCH = 25
+
+
 def run_catalog_lookups(generation, jobs, catalog_settings, callback):
     client = DependencyCatalogClient(catalog_settings)
-    cache = {}
-    for job in jobs:
-        cache_key = (job.tgi, job.iid if job.allow_iid_fallback else None,
-                     job.category if job.allow_iid_fallback else None, job.allow_iid_fallback)
-        cached = cache.get(cache_key)
-        if cached is None:
-            cached = lookup_catalog(
-                client, job.tgi, job.iid, job.category,
-                allow_iid_fallback=job.allow_iid_fallback,
-            )
-            cache[cache_key] = cached
-        status, matches, reason = cached
-        result = CatalogResult(generation, job.row_id, status, matches, reason)
-        wx.CallAfter(callback, generation, [result])
+    tgi_cache = {}
+    pending_iid_jobs = []
+    # Exact-TGI lookups resolve one row at a time (the API has no multi-TGI
+    # form), but posting each one separately makes the list crawl in row by
+    # row once the local database answers them in microseconds.
+    posted = []
+
+    def flush(force=False):
+        if posted and (force or len(posted) >= CATALOG_POST_BATCH):
+            wx.CallAfter(callback, generation, list(posted))
+            del posted[:]
+
+    try:
+        for job in jobs:
+            if job.tgi is not None:
+                cached = tgi_cache.get(job.tgi)
+                if cached is None:
+                    cached = client.search_tgi(job.tgi)
+                    tgi_cache[job.tgi] = cached
+                if cached.matches:
+                    posted.append(CatalogResult(generation, job.row_id, cached.status, cached.matches, "exact_tgi"))
+                    flush()
+                    continue
+                if cached.status in ("disabled", "error"):
+                    posted.append(CatalogResult(generation, job.row_id, cached.status, [], ""))
+                    flush()
+                    continue
+            if job.allow_iid_fallback and job.iid is not None:
+                pending_iid_jobs.append(job)
+            elif job.tgi is not None:
+                posted.append(CatalogResult(generation, job.row_id, "ok", [], ""))
+                flush()
+            else:
+                posted.append(CatalogResult(generation, job.row_id, "disabled", [], ""))
+                flush()
+        flush(force=True)
+
+        if not pending_iid_jobs:
+            return
+
+        # Batched: /api/iid takes a comma-separated id list, so all fallback
+        # lookups for this generation go out in a handful of requests instead of
+        # one urlopen per row.
+        iid_results = client.search_iids(job.iid for job in pending_iid_jobs)
+        results = []
+        for job in pending_iid_jobs:
+            expected_group = job.tgi[1] if job.tgi is not None else None
+            lookup_result = iid_results.get(job.iid, CatalogLookupResult("error", []))
+            matches = filter_catalog_matches(lookup_result.matches, job.category, expected_group)
+            results.append(CatalogResult(generation, job.row_id, lookup_result.status, matches, "iid_fallback"))
+        wx.CallAfter(callback, generation, results)
+    finally:
+        # Releases the database file, which is what lets a staged refresh be
+        # promoted the next time the dialog opens.
+        client.close()
 
 
 class DependencyResourcePanel(wx.html.HtmlWindow):
@@ -540,6 +604,10 @@ class DependenciesDlg(sc.SizedDialog):
         self._catalog_requested = False
         self.selected_row_id = None
         self._visible_row_ids = []
+        self._progress_dlg = None
+        self._download_cancel = None
+        self._download_blocking = False
+        self._identify_after_download = True
         self.Bind(wx.EVT_WINDOW_DESTROY, self.OnDestroy)
 
         filter_panel = wx.Panel(pane, -1)
@@ -567,7 +635,13 @@ class DependenciesDlg(sc.SizedDialog):
         self.identifyButton = wx.Button(filter_panel, -1, DepDlgIdentifyPackages)
         set_button_icon(self.identifyButton, "packages")
         self.identifyButton.Bind(wx.EVT_BUTTON, self.OnIdentifyPackages)
-        filter_sizer.Add(self.identifyButton, 0, wx.ALIGN_CENTER_VERTICAL)
+        filter_sizer.Add(self.identifyButton, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+
+        self.updateCatalogButton = wx.Button(filter_panel, -1, DepDlgUpdateCatalog)
+        set_button_icon(self.updateCatalogButton, "rotate-clockwise-2")
+        self.updateCatalogButton.Bind(wx.EVT_BUTTON, self.OnUpdateCatalog)
+        self.updateCatalogButton.Show(bool(self.catalog_settings.get("UseLocalDatabase", False)))
+        filter_sizer.Add(self.updateCatalogButton, 0, wx.ALIGN_CENTER_VERTICAL)
         filter_panel.SetSizer(filter_sizer)
         try:
             filter_panel.SetSizerProps(expand=True)
@@ -848,6 +922,25 @@ class DependenciesDlg(sc.SizedDialog):
         event.Skip()
 
     def OnIdentifyPackages(self, event):
+        catalog_db.promote_staged()
+        reason = catalog_db.refresh_reason(self.catalog_settings)
+        # Nothing to identify against yet, so wait for the download; a merely
+        # stale copy answers this run while the fresh one downloads behind it
+        # and is promoted the next time the dialog opens.
+        if reason == "missing" and self.StartCatalogDownload(blocking=True):
+            event.Skip()
+            return
+        if reason == "stale":
+            self.StartCatalogDownload(blocking=False)
+        self.BeginIdentification()
+        event.Skip()
+
+    def OnUpdateCatalog(self, event):
+        catalog_db.clear_download_failure()
+        self.StartCatalogDownload(blocking=True, identify_after=False)
+        event.Skip()
+
+    def BeginIdentification(self):
         self._catalog_requested = True
         self._catalog_generation += 1
         for row in self.rows:
@@ -858,6 +951,7 @@ class DependenciesDlg(sc.SizedDialog):
                 row,
                 self.catalog.enabled,
                 self.catalog.base_url,
+                self.catalog.local_available,
             )
         self.identifyButton.SetLabel(DepDlgIdentifyPackagesRunning)
         set_button_icon(self.identifyButton, "loader-2")
@@ -867,7 +961,80 @@ class DependenciesDlg(sc.SizedDialog):
             self.identifyButton.SetLabel(DepDlgIdentifyPackages)
             set_button_icon(self.identifyButton, "packages")
             self.identifyButton.Enable(True)
-        event.Skip()
+
+    def StartCatalogDownload(self, blocking, identify_after=True):
+        """Fetch the catalog database on a worker thread.
+
+        A blocking download shows a cancellable progress dialog and, unless
+        *identify_after* says otherwise, starts identification once it lands.
+        Returns False if a download was already running, leaving the caller to
+        carry on without one.
+        """
+        if self._download_cancel is not None:
+            return False
+        self._download_cancel = threading.Event()
+        self._download_blocking = blocking
+        self._identify_after_download = identify_after
+        if blocking:
+            self.updateCatalogButton.Enable(False)
+            self.identifyButton.Enable(False)
+            self._progress_dlg = wx.ProgressDialog(
+                DepDlgCatalogDownloadTitle,
+                DepDlgCatalogPreparing,
+                maximum=100,
+                parent=self,
+                style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_AUTO_HIDE
+                | wx.PD_ELAPSED_TIME | wx.PD_REMAINING_TIME,
+            )
+        settings = dict(self.catalog_settings)
+        threading.Thread(
+            target=run_catalog_download,
+            args=(settings, self._download_cancel, self.OnCatalogDownloadProgress,
+                  self.OnCatalogDownloadFinished),
+            name="catalog-db-download",
+            daemon=True,
+        ).start()
+        return True
+
+    def OnCatalogDownloadProgress(self, phase, done, total):
+        if not self._alive or self._progress_dlg is None:
+            return
+        if phase == "download" and total:
+            keep_going, _ = self._progress_dlg.Update(
+                min(100, int(done * 100 / total)),
+                DepDlgCatalogDownloading % (done / 1048576.0, total / 1048576.0),
+            )
+        else:
+            keep_going, _ = self._progress_dlg.Pulse(DepDlgCatalogPreparing)
+        if not keep_going and self._download_cancel is not None:
+            self._download_cancel.set()
+
+    def OnCatalogDownloadFinished(self, status):
+        blocking = self._download_blocking
+        identify_after = self._identify_after_download
+        self._download_cancel = None
+        self._download_blocking = False
+        if self._progress_dlg is not None:
+            self._progress_dlg.Destroy()
+            self._progress_dlg = None
+        if not self._alive:
+            return
+        self.updateCatalogButton.Enable(True)
+        self.identifyButton.Enable(True)
+        if status in ("ok", "unchanged"):
+            # Pick up the database that just landed.
+            self.catalog.close()
+            self.catalog = DependencyCatalogClient(self.catalog_settings)
+        if not blocking:
+            return
+        if status == "error":
+            wx.MessageBox(DepDlgCatalogDownloadFailed, DepDlgCatalogDownloadTitle,
+                          wx.OK | wx.ICON_WARNING, self)
+        elif status == "unchanged" and not identify_after:
+            wx.MessageBox(DepDlgCatalogUpToDate, DepDlgCatalogDownloadTitle,
+                          wx.OK | wx.ICON_INFORMATION, self)
+        if identify_after:
+            self.BeginIdentification()
 
     def ScheduleRender(self):
         if self._render_scheduled or not self._alive:
@@ -945,6 +1112,10 @@ class DependenciesDlg(sc.SizedDialog):
         if event.GetEventObject() is self:
             self._alive = False
             self._catalog_generation += 1
+            if self._download_cancel is not None:
+                self._download_cancel.set()
+            self._progress_dlg = None
+            self.catalog.close()
         event.Skip()
 
     def IsValidRTK(self, rtk):

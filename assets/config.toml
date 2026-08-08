@@ -190,6 +190,19 @@ Anisotropy = 8.0
 Enabled = true
 BaseUrl = "https://sc4proptexturecatalog-production.up.railway.app"
 TimeoutSeconds = 15
+# Missing-dependency IID lookups are batched into one request per this many
+# IDs (the catalog's /api/iid endpoint accepts a comma-separated id list).
+IidBatchSize = 25
+# The catalog publishes its full dataset as a ~23 MB SQLite file. With this
+# enabled it is downloaded once into %APPDATA%\sc4pimx and queried directly,
+# which is far faster than the API; the API stays as a fallback for when the
+# local copy is missing or unreadable. Set false to always use the API.
+UseLocalDatabase = true
+DatabaseUrl = "https://raw.githubusercontent.com/noah-severyn/SC4PropTextureCatalog/main/SC4PropTextureCatalogAPI/data/Catalog.db"
+# Age at which the local copy is refreshed in the background. 0 disables
+# automatic refresh; the Dependencies dialog can always refresh on demand.
+RefreshIntervalDays = 14
+DownloadTimeoutSeconds = 60
 
 # --- Plugin scan folders ---
 # Populated by the Configure dialog. Each entry has a path and a recurse flag.
