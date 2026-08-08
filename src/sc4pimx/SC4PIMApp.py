@@ -5524,6 +5524,9 @@ class MainFrame(wx.Frame):
             item.Check(mode == selected_appearance)
             self.Bind(wx.EVT_MENU, self.OnSelectAppearance, id=int(item_id))
         menu1.AppendSubMenu(self.appearanceMenu, appearanceMenuLabel)
+        self.confirmExitMenuItem = menu1.AppendCheckItem(wx.ID_ANY, menuConfirmExit)
+        self.confirmExitMenuItem.Check(config.confirm_exit_enabled())
+        self.Bind(wx.EVT_MENU, self.OnToggleConfirmExit, self.confirmExitMenuItem)
         menu1.AppendSeparator()
         menu1.Append(104, menuItem1_1)
         menuBar.Append(menu1, menuItem1)
@@ -5703,13 +5706,31 @@ class MainFrame(wx.Frame):
             return
         self.LoadDatas()
 
+    def OnToggleConfirmExit(self, event):
+        config.save_confirm_exit(self.confirmExitMenuItem.IsChecked())
+
+    def _has_unsaved_tabs(self):
+        for index in range(self.nb.GetPageCount()):
+            page = self.nb.GetPage(index)
+            if getattr(getattr(page, 'exemplar', None), 'modified', False):
+                return True
+        return False
+
     def OnCloseWindow(self, event):
-        dlg = wx.MessageDialog(self, quitMsg, appTitle, wx.YES_NO | wx.YES_DEFAULT | wx.ICON_INFORMATION)
-        res = dlg.ShowModal()
-        dlg.Destroy()
-        if res == wx.ID_NO:
-            event.Veto()
-            return
+        if config.confirm_exit_enabled():
+            msg = quitMsg
+        elif self._has_unsaved_tabs():
+            # Unsaved work still warns even with the routine prompt turned off.
+            msg = quitUnsavedMsg
+        else:
+            msg = None
+        if msg is not None:
+            dlg = wx.MessageDialog(self, msg, appTitle, wx.YES_NO | wx.YES_DEFAULT | wx.ICON_INFORMATION)
+            res = dlg.ShowModal()
+            dlg.Destroy()
+            if res == wx.ID_NO:
+                event.Veto()
+                return
         self._save_main_window_state()
         self.Destroy()
         sys.exit(0)

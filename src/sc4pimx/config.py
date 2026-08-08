@@ -300,6 +300,22 @@ def save_appearance(mode: str) -> Path:
     return target
 
 
+def confirm_exit_enabled() -> bool:
+    """Whether quitting always shows a confirmation prompt (default on)."""
+    return bool(load_settings().get("ConfirmExit", True))
+
+
+def save_confirm_exit(enabled: bool) -> Path:
+    """Persist whether quitting asks for confirmation."""
+    source = config_path()
+    text = source.read_text(encoding="utf-8") if source.exists() else ""
+    doc = tomlkit.parse(text)
+    doc["ConfirmExit"] = bool(enabled)
+    target = ensure_user_data_dir() / CONFIG_FILENAME
+    target.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    return target
+
+
 def save_folders(folders) -> Path:
     """Persist the plugin-scan folder list, preserving the existing settings.
 
