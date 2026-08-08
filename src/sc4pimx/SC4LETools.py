@@ -18,6 +18,14 @@ MULTI_FSH_LABEL = "Multi"
 TEXTURE_STRIP_TILE_SIZE = 96
 TEXTURE_WEALTH_LABELS = {0x0000: "0", 0x1000: "$", 0x2000: "$$", 0x3000: "$$$"}
 
+# Corner-dot badge colours for prop/flora behaviours; matches P&P's palette.
+BEHAVIOR_DOT_COLOURS = {
+    "day_night": (0x63, 0x66, 0xF1),   # indigo
+    "timed": (0xF5, 0x9E, 0x0B),       # amber
+    "seasonal": (0x10, 0xB9, 0x81),    # emerald
+    "chance": (0xF4, 0x3F, 0x5E),      # rose
+}
+
 # Thumbnail decoding happens on the GUI thread because it creates wx.Bitmap
 # objects. Process as much as fits in a short slice, then let wx service input
 # and painting before continuing.
@@ -789,16 +797,16 @@ class LEAssetItem(object):
                 result = []
                 nighttime = ex.GetProp(0x49c9c93c)
                 if nighttime and nighttime[0]:
-                    result.append((0x63, 0x66, 0xF1))    # Day/Night - indigo
+                    result.append(BEHAVIOR_DOT_COLOURS["day_night"])
                 tod = ex.GetProp(0x4a149631)
                 if tod and len(tod) >= 2:
-                    result.append((0xF5, 0x9E, 0x0B))    # Timed - amber
+                    result.append(BEHAVIOR_DOT_COLOURS["timed"])
                 if (ex.GetProp(0xca7515cc) or ex.GetProp(0x4a764564) or
                         ex.GetProp(0x0a751675)):
-                    result.append((0x10, 0xB9, 0x81))    # Seasonal - emerald
+                    result.append(BEHAVIOR_DOT_COLOURS["seasonal"])
                 rc = ex.GetProp(0x4a751ad5)
                 if rc and rc[0] < 100:
-                    result.append((0xF4, 0x3F, 0x5E))    # Random chance - rose
+                    result.append(BEHAVIOR_DOT_COLOURS["chance"])
                 flags = tuple(result)
             except Exception:
                 flags = ()
@@ -1661,18 +1669,21 @@ class LEAssetGrid(wx.ScrolledWindow):
                 bullet = '  - %s (0x%08X)' % (name, fid) if name else '  - 0x%08X' % fid
                 rows.append(('span', bullet, False))
 
-        parts = []
+        dot_rows = []
         if has_day_night:
-            parts.append(LEXTooltipDayNight)
+            dot_rows.append(('dot', BEHAVIOR_DOT_COLOURS['day_night'], LEXTooltipDayNight))
         if has_timed:
-            parts.append(LEXTooltipTimed)
+            dot_rows.append(('dot', BEHAVIOR_DOT_COLOURS['timed'], LEXTooltipTimed))
         if has_seasonal:
-            parts.append(LEXTooltipSeasonal)
+            dot_rows.append(('dot', BEHAVIOR_DOT_COLOURS['seasonal'], LEXTooltipSeasonal))
         if chance is not None and chance < 100:
-            parts.append('%d%%' % chance)
-        if not parts:
-            parts.append(LEXTooltipStatic)
-        rows.append(('pair', LEXTooltipBehavior + ':', ' + '.join(parts)))
+            dot_rows.append(('dot', BEHAVIOR_DOT_COLOURS['chance'],
+                             '%s %d%%' % (LEXTooltipSpawnChance, chance)))
+        if dot_rows:
+            rows.append(('span', LEXTooltipBehavior + ':', True))
+            rows.extend(dot_rows)
+        else:
+            rows.append(('pair', LEXTooltipBehavior + ':', LEXTooltipStatic))
 
         if has_timed:
             rows.append(('pair', LEXTooltipVisibleBetween + ':',
@@ -1766,6 +1777,14 @@ class LEAssetGrid(wx.ScrolledWindow):
                         f.SetWeight(wx.FONTWEIGHT_BOLD)
                         st.SetFont(f)
                     grid.Add(st, pos=(row_idx, 0), span=(1, 2), flag=wx.ALIGN_LEFT)
+                elif entry[0] == 'dot':
+                    _, colour, text = entry
+                    line = wx.BoxSizer(wx.HORIZONTAL)
+                    bullet = wx.StaticText(panel, -1, '●')
+                    bullet.SetForegroundColour(wx.Colour(*colour))
+                    line.Add(bullet, 0, wx.RIGHT, 4)
+                    line.Add(wx.StaticText(panel, -1, text), 0)
+                    grid.Add(line, pos=(row_idx, 0), span=(1, 2), flag=wx.ALIGN_LEFT)
                 else:  # 'pair'
                     _, label, value = entry
                     lab = wx.StaticText(panel, -1, label)
