@@ -663,8 +663,16 @@ class LotEditorWin(wx.Frame):
     zoomScale = [1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1.0 / 2.0, 1, 2, 4, 8]
     zoomScale3D = [1 / 32.0, 1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1.0 / 2.0, 1, 2, 4]
     zoomScaleATC = [1 / 64.0, 1.0 / 32.0, 1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1 / 2.0, 1, 2]
-    # pixels-to-world scale; 1/14 rendered Sims half their in-game size
-    ATC_PREVIEW_WORLD_SCALE = 1.0 / 7.0
+    @staticmethod
+    def atc_world_scale(zoom):
+        """Metres per sprite pixel for the ATC variant at this asset zoom.
+
+        ATC/AVP frames are pixel art authored per zoom level; a 16 m tile
+        spans 8<<zoom pixels (8 at zoom 0 up to 128 at zoom 4), so the
+        conversion halves with every zoom step. A fixed constant only ever
+        matched one zoom and left Sims tiny at every other one.
+        """
+        return 16.0 / (8 << zoom)
 
     def __init__(self, parent, ID, title, size):
         wx.Frame.__init__(self, parent, ID, title, size=size, style=wx.DEFAULT_FRAME_STYLE)
@@ -5753,7 +5761,7 @@ class LotEditorWin(wx.Frame):
                 if what.draw_le(zoom, rotMapping[rot]):
                     billboard = render.model.copy()
                     billboard[0:3, 0:3] = numpy.diag((1.0, 1.0, -1.0))
-                    scale = LotEditorWin.ATC_PREVIEW_WORLD_SCALE
+                    scale = LotEditorWin.atc_world_scale(zoom)
                     billboard = billboard @ SC4Matrix.scale(scale, scale, scale)
                     what.DrawGL(
                         self.s3DTexturesHolder,
