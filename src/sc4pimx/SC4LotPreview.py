@@ -1729,6 +1729,10 @@ class LotEditorWin(wx.Frame):
 
     def DrawCityContextAmbient(self):
         """Draw moving traffic and pedestrians as a separate dynamic batch."""
+        # Drop the previous frame's actors first: the shadow pass reads
+        # _context_ambient_mesh, and a stale mesh would keep casting shadows
+        # for actors that are no longer drawn (gated off below).
+        self._context_ambient_mesh = None
         if (
             self._icon_render
             or self._context_scene is None
@@ -1771,7 +1775,11 @@ class LotEditorWin(wx.Frame):
         renderer = self.glCanvas2D.renderer.primitives
         fade = self._context_fade(shadow=True)
         renderer.draw_interleaved(GL_TRIANGLES, self._context_mesh.shadow_vertices, mvp, fade=fade)
-        if self.zoom3D >= 2:
+        # Detail and actor shadows follow the same visibility gates as their
+        # geometry (see DrawCityContext / DrawCityContextAmbient), so a caster
+        # never casts while its body is not drawn.
+        detail_threshold = {"low": 3, "medium": 2, "high": 1}.get(self.contextDetail, 2)
+        if self.zoom3D >= detail_threshold:
             renderer.draw_interleaved(GL_TRIANGLES, self._context_mesh.detail_shadow_vertices, mvp, fade=fade)
             ambient = getattr(self, "_context_ambient_mesh", None)
             if ambient is not None and len(ambient.shadow_vertices):
@@ -5774,6 +5782,17 @@ class LotEditorWin(wx.Frame):
                 glDisable(GL_BLEND)
         return
 
+    @staticmethod
+    def _viewer_casts_shadow(viewer):
+        """Whether any of the viewer's states has S3D geometry to project.
+
+        ATC billboards are skipped as casters (no planar silhouette), but a
+        mixed-state prop (e.g. ATC animation with an S3D dormant state) must
+        still enter the pass; DrawModel resolves the active state and the ATC
+        member is a no-op there. Checking only state 0 dropped those shadows.
+        """
+        return any(what.__class__ != ATC for what in viewer.viewingData)
+
     def _draw_shadow_pass(self, rot2D, rotation, rotMapping, assetZoom, viewZoom, lotSizeXOver, lotSizeYOver):
         """Stencil a union of projected casters, then darken it exactly once."""
         if not getattr(self.glCanvas2D, "stencil_bits", 0):
@@ -5838,7 +5857,7 @@ class LotEditorWin(wx.Frame):
                         continue
                     if not self._viewer_is_temporally_active(propViewer):
                         continue
-                    if propViewer.viewingData[0].__class__ == ATC:
+                    if not self._viewer_casts_shadow(propViewer):
                         continue
                     cast(prop, propViewer)
             if self._is_layer_visible("3d", LAYER_FLORA):
@@ -5847,7 +5866,7 @@ class LotEditorWin(wx.Frame):
                         continue
                     if not self._viewer_is_temporally_active(floraViewer):
                         continue
-                    if floraViewer.viewingData[0].__class__ == ATC:
+                    if not self._viewer_casts_shadow(floraViewer):
                         continue
                     cast(flora, floraViewer)
             self._flush_shadow_batches(shadow_batches)
