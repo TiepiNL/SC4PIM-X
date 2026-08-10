@@ -382,13 +382,26 @@ class S3DTexturesHolder(object):
         cached['future'][mode] = future
         holder_ref = weakref.ref(self)
 
+        def refresh_canvas():
+            # Runs later, off wx's event queue -- the holder (and its
+            # glCanvas) can have been torn down in the meantime, in which
+            # case Refresh() itself raises RuntimeError from inside wx's
+            # CallAfter dispatch, past any try/except taken when scheduling.
+            holder = holder_ref()
+            if holder is None:
+                return
+            try:
+                holder.glCanvas.Refresh(False)
+            except RuntimeError:
+                pass
+
         def decoded(_future):
             holder = holder_ref()
             if holder is None or cached['generation'].get(mode) != generation:
                 return
             try:
                 import wx
-                wx.CallAfter(holder.glCanvas.Refresh, False)
+                wx.CallAfter(refresh_canvas)
             except Exception:
                 pass
 

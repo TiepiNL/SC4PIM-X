@@ -282,10 +282,18 @@ class SubmenuTreeDialog(wx.Dialog):
     def _selected_data(self):
         if self._closing:
             return None, None
-        item = self.tree.GetSelection()
-        if not item.IsOk():
+        # _closing only catches this dialog's own Close()/Destroy() path.
+        # On Windows the native tree control can still fire a selection
+        # event off a TreeCtrl whose C++ side is already gone (e.g. the
+        # owning frame is torn down while this modeless dialog is still
+        # open), so the call itself must be guarded too.
+        try:
+            item = self.tree.GetSelection()
+            if not item.IsOk():
+                return None, None
+            data = self.tree.GetItemData(item)
+        except RuntimeError:
             return None, None
-        data = self.tree.GetItemData(item)
         if not data:
             return None, None
         return data
@@ -294,12 +302,15 @@ class SubmenuTreeDialog(wx.Dialog):
         """Button ID to act on: the selected menu, or a selected item's menu."""
         if self._closing:
             return None
-        item = self.tree.GetSelection()
-        while item.IsOk():
-            data = self.tree.GetItemData(item)
-            if data and data[0] == KIND_MENU:
-                return data[1].value
-            item = self.tree.GetItemParent(item)
+        try:
+            item = self.tree.GetSelection()
+            while item.IsOk():
+                data = self.tree.GetItemData(item)
+                if data and data[0] == KIND_MENU:
+                    return data[1].value
+                item = self.tree.GetItemParent(item)
+        except RuntimeError:
+            return None
         return None
 
     def _on_selection(self, event):
