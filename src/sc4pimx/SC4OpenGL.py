@@ -3,6 +3,7 @@ import ctypes
 import logging
 import math
 import os
+import weakref
 
 import wx
 from OpenGL.GL import (
@@ -102,6 +103,7 @@ class MyCanvasBase(glcanvas.GLCanvas):
             raise RuntimeError("OpenGL 3.3 core profile is required")
         self.renderer = None
         self._frame_call = None
+        self._destroying = False
         self._debug_callback = None
         self.displayer = None
         self.init = False
@@ -216,27 +218,52 @@ class MyCanvasBase(glcanvas.GLCanvas):
 
     def request_animation(self, delay_ms=100):
         """Request one future repaint; repeated requests coalesce per canvas."""
+        if self._destroying:
+            return
         if self._frame_call is not None and self._frame_call.IsRunning():
             return
-        self._frame_call = wx.CallLater(max(1, int(delay_ms)), self._on_animation_frame)
+        self._frame_call = wx.CallLater(
+            max(1, int(delay_ms)),
+            MyCanvasBase._dispatch_animation_frame,
+            weakref.ref(self),
+        )
+
+    @staticmethod
+    def _dispatch_animation_frame(canvas_ref):
+        """Run a queued frame without retaining or reviving a dead wx canvas."""
+        canvas = canvas_ref()
+        if canvas is None or canvas._destroying:
+            return
+        try:
+            canvas._on_animation_frame()
+        except RuntimeError:
+            # The native window can disappear after the check above but before
+            # the callback reaches it. Treat that race exactly like destroy.
+            canvas._destroying = True
+            canvas._frame_call = None
 
     def _on_animation_frame(self):
         self._frame_call = None
-        if self and self.IsShownOnScreen():
+        if not self._destroying and not self.IsBeingDeleted() and self.IsShownOnScreen():
             self.Refresh(False)
 
     def on_destroy(self, event):
         if event.GetEventObject() is not self:
             event.Skip()
             return
-        if self._frame_call is not None:
-            self._frame_call.Stop()
-            self._frame_call = None
+        self._destroying = True
+        frame_call = self._frame_call
+        self._frame_call = None
+        if frame_call is not None:
+            try:
+                frame_call.Stop()
+            except RuntimeError:
+                pass
         if self.renderer is not None:
             try:
                 super().SetCurrent(self.context)
                 self.renderer.release_gl()
-            except (RuntimeError, wx.PyDeadObjectError):
+            except RuntimeError:
                 pass
             self.renderer = None
         event.Skip()
