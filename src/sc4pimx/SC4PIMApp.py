@@ -7,6 +7,7 @@ import logging
 import os.path
 import random
 import re
+import shutil
 import struct
 import sys
 import tempfile
@@ -44,7 +45,7 @@ from .paths import asset_path, ensure_user_data_dir, image_db_dir, image_db_path
 from .S3DViewer import S3DViewer
 from .SC4Data import conversion_target_kind, list_convertible_categories, make_ltext_entry
 from .SC4LotPreview import *
-from .SC4MenuScanner import invalidate_menu_cache
+from .SC4MenuScanner import EXEMPLAR_PATCH_GROUP, SUBMENU_BUTTON_GROUP, invalidate_menu_cache
 from .settings import *
 from .TablerIcons import dialog_button, dialog_button_sizer, icon_bitmap, icon_button, set_button_icon
 from .textutil import decode_sc4_string_prop, decode_sc4_text, decode_unicode_escape, encode_sc4_text
@@ -246,6 +247,27 @@ def _new_populated_exemplar_entry(tgi, file_name, virtual_dat, props, cohort=Fal
     return entry
 
 
+def _new_exemplar_patch_entry(iid, file_name, virtual_dat, props):
+    """Create a cohort recognized by SC4ResourceLoadingHooks as an Exemplar Patch."""
+    return _new_populated_exemplar_entry(
+        (_COHORT_TYPE, EXEMPLAR_PATCH_GROUP, int(iid) & 0xFFFFFFFF),
+        file_name,
+        virtual_dat,
+        props,
+        cohort=True,
+    )
+
+
+def _new_submenu_button_entry(iid, file_name, virtual_dat, props):
+    """Create a Mayor Mode submenu button in the group recognized by the game."""
+    return _new_populated_exemplar_entry(
+        (_BUILDING_EXEMPLAR_TYPE, SUBMENU_BUTTON_GROUP, int(iid) & 0xFFFFFFFF),
+        file_name,
+        virtual_dat,
+        props,
+    )
+
+
 def _clone_exemplar_entry(source_exemplar, tgi, file_name, virtual_dat):
     return _new_exemplar_entry(tgi, file_name, virtual_dat, source_exemplar.Rep())
 
@@ -369,7 +391,11 @@ def _candidate_iid():
     return random.randrange(1, 16) * 0x10000000 + (seconds & 0x0FFFFFFF)
 
 
-def _allocate_conversion_iid(virtual_dat, tgi_prefixes, candidate_factory=None):
+def _allocate_conversion_iid(
+        virtual_dat, tgi_prefixes, candidate_factory=None, forbidden_ids=None):
+    forbidden_ids = {
+        int(value) & 0xFFFFFFFF for value in (forbidden_ids or ())
+    }
     for attempt in range(256):
         if candidate_factory is not None:
             candidate = int(candidate_factory()) & 0xFFFFFFFF
@@ -377,9 +403,36 @@ def _allocate_conversion_iid(virtual_dat, tgi_prefixes, candidate_factory=None):
             candidate = _candidate_iid()
         if attempt and candidate_factory is None:
             candidate = (candidate + attempt * 0x00100001) & 0xFFFFFFFF
-        if candidate and all(virtual_dat.getEntry(t, g, candidate) is None for t, g in tgi_prefixes):
+        if (candidate and candidate not in forbidden_ids
+                and all(virtual_dat.getEntry(t, g, candidate) is None
+                        for t, g in tgi_prefixes)):
             return candidate
     raise RuntimeError(convertBuildingNoFreeIID)
+
+
+def _used_occupant_group_ids(virtual_dat):
+    """Return known and loaded Occupant Group IDs unavailable to submenu buttons."""
+    values = set()
+    prop_def = getattr(virtual_dat, 'properties', {}).get(0xAA1DD396)
+    for value in getattr(prop_def, 'Options', {}) or {}:
+        try:
+            values.add(int(value) & 0xFFFFFFFF)
+        except (TypeError, ValueError):
+            continue
+    for entry in getattr(virtual_dat, 'allEntries', ()) or ():
+        exemplar = getattr(entry, 'exemplar', None)
+        if exemplar is None:
+            continue
+        try:
+            groups = exemplar.GetProp(0xAA1DD396) or ()
+        except Exception:
+            continue
+        for value in groups:
+            try:
+                values.add(int(value) & 0xFFFFFFFF)
+            except (TypeError, ValueError):
+                continue
+    return values
 
 
 def _entry_content_copy(entry):
@@ -462,6 +515,80 @@ def _write_entries_atomic(file_name, entries):
         except OSError:
             pass
         raise
+
+
+def _next_backup_path(file_name):
+    """Return a non-destructive backup name next to *file_name*."""
+    candidate = file_name + '.bak'
+    suffix = 1
+    while os.path.exists(candidate):
+        candidate = file_name + '.bak.%d' % suffix
+        suffix += 1
+    return candidate
+
+
+def _plan_exemplar_submenu_updates(targets, submenu_id):
+    """Group direct building-exemplar membership updates by source package."""
+    packages = {}
+    skipped = []
+    for target in targets:
+        if target.kind != 'building':
+            skipped.append((target, 'unsupported'))
+            continue
+        current = set(target.exemplar.GetProp(0xAA1DD399) or ())
+        if submenu_id in current:
+            skipped.append((target, 'present'))
+            continue
+        file_name = target.exemplar.entry.fileName
+        if not file_name or not os.path.isfile(file_name) or not os.access(file_name, os.W_OK):
+            skipped.append((target, 'unwritable'))
+            continue
+        packages.setdefault(file_name, []).append(target)
+    return packages, skipped
+
+
+def _set_exemplar_submenu_membership(virtual_dat, exemplar, submenu_id):
+    values = sorted(set(exemplar.GetProp(0xAA1DD399) or ()) | {submenu_id})
+    exemplar.AddTextProp(CreateAProp(virtual_dat.properties[0xAA1DD399], tuple(values)))
+    exemplar.Maj()
+
+
+def _execute_exemplar_submenu_updates(virtual_dat, packages, submenu_id, create_backups=True):
+    """Apply a prepared direct-membership plan, writing each package once."""
+    updated = []
+    failures = []
+    backups = []
+    for file_name, targets in packages.items():
+        originals = {
+            target.tgi: tuple(target.exemplar.GetProp(0xAA1DD399) or ())
+            for target in targets
+        }
+        try:
+            for target in targets:
+                _set_exemplar_submenu_membership(virtual_dat, target.exemplar, submenu_id)
+            entries = list(virtual_dat.GetAllEntriesFromFile(file_name))
+            if not entries:
+                raise ValueError('Package has no indexed entries')
+            if create_backups:
+                backup = _next_backup_path(file_name)
+                shutil.copy2(file_name, backup)
+                backups.append(backup)
+            _write_entries_atomic(file_name, entries)
+            updated.extend(targets)
+        except Exception as exc:
+            logger.exception('Could not update submenu membership in %s', file_name)
+            for target in targets:
+                old = originals[target.tgi]
+                if old:
+                    target.exemplar.AddTextProp(
+                        CreateAProp(virtual_dat.properties[0xAA1DD399], old)
+                    )
+                else:
+                    target.exemplar.RemoveProp(0xAA1DD399)
+                target.exemplar.Maj()
+            failures.append((file_name, str(exc)))
+    invalidate_menu_cache(virtual_dat)
+    return updated, failures, backups
 
 
 def _source_building_candidates(virtual_dat, lot_exemplar, preferred_exemplar=None):
@@ -632,15 +759,19 @@ def create_submenu_flow(window, frame, virtual_dat, source_icon=None, parent_id=
     from .SC4NewSubmenuDlg import open_new_submenu_dialog
 
     prefixes = [
-        (_BUILDING_EXEMPLAR_TYPE, frame.GID),
+        (_BUILDING_EXEMPLAR_TYPE, SUBMENU_BUTTON_GROUP),
         (_PNG_ICON_TYPE, _PIM_RESOURCE_GROUP),
         (_LTEXT_TYPE, _PIM_RESOURCE_GROUP),
     ]
-    suggested_id = _allocate_conversion_iid(virtual_dat, prefixes)
+    occupant_group_ids = _used_occupant_group_ids(virtual_dat)
+    suggested_id = _allocate_conversion_iid(
+        virtual_dat, prefixes, forbidden_ids=occupant_group_ids,
+    )
 
     result = open_new_submenu_dialog(
         window, virtual_dat, suggested_id,
-        lambda: _allocate_conversion_iid(virtual_dat, prefixes),
+        lambda: _allocate_conversion_iid(
+            virtual_dat, prefixes, forbidden_ids=occupant_group_ids),
         source_icon=source_icon,
         parent_id=parent_id,
     )
@@ -651,10 +782,17 @@ def create_submenu_flow(window, frame, virtual_dat, source_icon=None, parent_id=
     if not all(virtual_dat.getEntry(t, g, iid) is None for t, g in prefixes):
         wx.MessageBox(LEXNewSubmenuIdCollision, LEXNewSubmenuDialogTitle, wx.OK | wx.ICON_ERROR, window)
         return None
+    if iid in occupant_group_ids:
+        wx.MessageBox(
+            LEXNewSubmenuOccupantGroupCollision % iid,
+            LEXNewSubmenuDialogTitle,
+            wx.OK | wx.ICON_ERROR,
+            window,
+        )
+        return None
 
     file_name = _unused_output_path(frame.rootFolder, _safe_conversion_file_stem(result.name), '.SC4Desc')
 
-    building_tgi = (_BUILDING_EXEMPLAR_TYPE, frame.GID, iid)
     icon_tgi = (_PNG_ICON_TYPE, _PIM_RESOURCE_GROUP, iid)
     name_ltext_tgi = (_LTEXT_TYPE, _PIM_RESOURCE_GROUP, iid)
     desc_ltext_tgi = (_LTEXT_TYPE, frame.GID, iid)
@@ -681,24 +819,92 @@ def create_submenu_flow(window, frame, virtual_dat, source_icon=None, parent_id=
         entries.append(desc_entry)
         props.append(CreateAProp(virtual_dat.properties[0xCA416AB5], desc_ltext_tgi))
 
-    submenu_entry = _new_populated_exemplar_entry(
-        building_tgi, file_name, virtual_dat, props,
-    )
+    submenu_entry = _new_submenu_button_entry(iid, file_name, virtual_dat, props)
     entries.append(submenu_entry)
 
     _write_entries_atomic(file_name, entries)
     _publish_new_entries(virtual_dat, entries)
 
-    # Basename only: the full plugins path turns the message box into a
-    # six-line wall of wrapped text, and the file always lands in the
-    # configured plugins root anyway.
-    answer = wx.MessageBox(
+    wx.MessageBox(
         LEXNewSubmenuSuccess % (result.name, iid, os.path.basename(file_name)),
-        LEXNewSubmenuDialogTitle, wx.YES_NO | wx.ICON_INFORMATION, window,
+        LEXNewSubmenuDialogTitle, wx.OK | wx.ICON_INFORMATION, window,
     )
-    if answer == wx.YES:
+    assignment = _choose_post_create_assignment(window, result.name)
+    if assignment == 'exemplar':
+        exemplar_into_submenu_flow(window, virtual_dat, parent_id=iid)
+    elif assignment == 'patch':
         patch_into_submenu_flow(window, frame, virtual_dat, parent_id=iid)
     return iid
+
+
+def _choose_post_create_assignment(window, submenu_name):
+    """Ask how a newly created submenu should receive its first members."""
+    dlg = wx.Dialog(window, -1, LEXSubmenuPostCreateTitle,
+                    style=wx.DEFAULT_DIALOG_STYLE)
+    choice = {'value': None}
+    root = wx.BoxSizer(wx.VERTICAL)
+    message = wx.StaticText(dlg, -1, LEXSubmenuPostCreateHelp % submenu_name)
+    message.Wrap(520)
+    root.Add(message, 0, wx.EXPAND | wx.ALL, 12)
+    buttons = wx.BoxSizer(wx.HORIZONTAL)
+
+    def add_button(label, value, icon=None):
+        button = wx.Button(dlg, -1, label)
+        if icon:
+            set_button_icon(button, icon)
+        button.Bind(wx.EVT_BUTTON, lambda _event: (choice.update(value=value), dlg.EndModal(wx.ID_OK)))
+        buttons.Add(button, 0, wx.LEFT, 8)
+
+    add_button(LEXSubmenuPostCreateExemplar, 'exemplar')
+    add_button(LEXSubmenuPostCreatePatch, 'patch')
+    add_button(LEXSubmenuPostCreateDone, None)
+    root.Add(buttons, 0, wx.ALIGN_RIGHT | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+    dlg.SetSizerAndFit(root)
+    dlg.CentreOnParent()
+    try:
+        dlg.ShowModal()
+        return choice['value']
+    finally:
+        dlg.Destroy()
+
+
+def exemplar_into_submenu_flow(window, virtual_dat, seed=None, parent_id=None):
+    """Assign buildings by editing their source exemplars and packages."""
+    from .SC4SubmenuPatchDlg import MODE_EXEMPLAR, open_submenu_assignment_dialog
+
+    result = open_submenu_assignment_dialog(
+        window, virtual_dat, seed_target=seed, parent_id=parent_id,
+        mode=MODE_EXEMPLAR,
+    )
+    if result is None:
+        return None
+    packages, skipped = _plan_exemplar_submenu_updates(result.targets, result.parent_id)
+    update_count = sum(len(targets) for targets in packages.values())
+    if not update_count:
+        wx.MessageBox(LEXSubmenuExemplarNothingToUpdate, LEXSubmenuExemplarBatchDialogTitle,
+                      wx.OK | wx.ICON_INFORMATION, window)
+        return 0
+    answer = wx.MessageBox(
+        LEXSubmenuExemplarConfirm % (update_count, len(packages), len(skipped)),
+        LEXSubmenuExemplarConfirmTitle,
+        wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
+        window,
+    )
+    if answer != wx.YES:
+        return None
+    updated, failures, backups = _execute_exemplar_submenu_updates(
+        virtual_dat, packages, result.parent_id, create_backups=result.create_backups,
+    )
+    if failures:
+        details = '\n'.join('%s: %s' % (os.path.basename(path), error)
+                            for path, error in failures)
+        message = LEXSubmenuExemplarResultPartial % (len(updated), len(failures), details)
+        style = wx.OK | wx.ICON_WARNING
+    else:
+        message = LEXSubmenuExemplarResultSuccess % (len(updated), len(packages), len(backups))
+        style = wx.OK | wx.ICON_INFORMATION
+    wx.MessageBox(message, LEXSubmenuExemplarResultTitle, style, window)
+    return len(updated)
 
 
 def patch_into_submenu_flow(window, frame, virtual_dat, seed=None, parent_id=None):
@@ -722,7 +928,7 @@ def patch_into_submenu_flow(window, frame, virtual_dat, seed=None, parent_id=Non
             flat.append(t.tgi[2])
         return tuple(flat)
 
-    prefixes = [(_BUILDING_EXEMPLAR_TYPE, frame.GID), (_COHORT_TYPE, frame.GID)]
+    prefixes = [(_COHORT_TYPE, EXEMPLAR_PATCH_GROUP)]
     first_id = _allocate_conversion_iid(virtual_dat, prefixes)
     second_id = first_id
     if building_targets and flora_targets:
@@ -736,10 +942,7 @@ def patch_into_submenu_flow(window, frame, virtual_dat, seed=None, parent_id=Non
     patched_count = 0
 
     def build_cohort(iid, props):
-        tgi = (_COHORT_TYPE, frame.GID, iid)
-        return _new_populated_exemplar_entry(
-            tgi, file_name, virtual_dat, props, cohort=True,
-        )
+        return _new_exemplar_patch_entry(iid, file_name, virtual_dat, props)
 
     if building_targets:
         entries.append(build_cohort(first_id, [
@@ -852,7 +1055,10 @@ def open_submenu_tree_view(frame, virtual_dat):
 
     actions = SubmenuTreeActions(
         new_submenu=lambda parent_id: create_submenu_flow(frame, frame, virtual_dat, parent_id=parent_id),
-        add_items=lambda parent_id: patch_into_submenu_flow(frame, frame, virtual_dat, parent_id=parent_id),
+        edit_exemplars=lambda parent_id: exemplar_into_submenu_flow(
+            frame, virtual_dat, parent_id=parent_id),
+        create_patch=lambda parent_id: patch_into_submenu_flow(
+            frame, frame, virtual_dat, parent_id=parent_id),
         open_descriptor=lambda descriptor: frame.FillPropList(descriptor, False),
         open_menu=lambda tgi: _open_submenu_button_page(frame, virtual_dat, tgi),
         change_icon=lambda menu_entry: change_submenu_icon_flow(frame, virtual_dat, menu_entry),
@@ -3271,9 +3477,7 @@ class NoteBookPanel(wx.Panel):
             self.popupID39 = wx.NewIdRef()  # Apply Transit Preset…
             self.popupID40 = wx.NewIdRef()
             self.popupID41 = wx.NewIdRef()
-            self.popupID42 = wx.NewIdRef()
             self.popupID43 = wx.NewIdRef()
-            self.popupID44 = wx.NewIdRef()
             self.popupID1 = wx.NewIdRef()
             self.popupID2 = wx.NewIdRef()
             self.popupID3 = wx.NewIdRef()
@@ -3327,9 +3531,7 @@ class NoteBookPanel(wx.Panel):
             self.Bind(wx.EVT_MENU, self.OnEditTransitSwitches, id=self.popupID38)
             self.Bind(wx.EVT_MENU, self.OnApplyTransitPreset, id=self.popupID39)
             self.Bind(wx.EVT_MENU, self.OnEditBuildingSubmenus, id=self.popupID40)
-            self.Bind(wx.EVT_MENU, self.OnNewSubmenu, id=self.popupID42)
             self.Bind(wx.EVT_MENU, self.OnPatchIntoSubmenu, id=self.popupID43)
-            self.Bind(wx.EVT_MENU, self.OnShowSubmenuTree, id=self.popupID44)
             self.Bind(wx.EVT_MENU, self.OnConvertLotBuilding, id=self.popupID41)
         menu = wx.Menu()
         if self.exemplar.GetProp(16)[0] == 16:
@@ -3466,16 +3668,11 @@ class NoteBookPanel(wx.Panel):
                 bSep = True
                 menu.AppendSeparator()
             menu.Append(self.popupID17, popupPropertyMenuItem17)
-            # One nested menu rather than four sibling entries: only the first
-            # acts on this building, the rest are plugin-wide submenu tools.
-            submenuMenu = wx.Menu()
-            submenuMenu.Append(self.popupID40, LEXBuildingSubmenuMenuItem)
-            submenuMenu.AppendSeparator()
-            submenuMenu.Append(self.popupID42, LEXNewSubmenuMenuItem)
-            submenuMenu.Append(self.popupID43, LEXSubmenuPatchMenuItem)
-            submenuMenu.AppendSeparator()
-            submenuMenu.Append(self.popupID44, LEXSubmenuTreeMenuItem)
-            menu.AppendSubMenu(submenuMenu, LEXSubmenuContextMenu)
+            # These two actions are specifically about the open building. The
+            # plugin-wide creation, batch patch, and tree tools live in the
+            # main Submenus menu instead.
+            menu.Append(self.popupID40, LEXBuildingSubmenuMenuItem)
+            menu.Append(self.popupID43, LEXSubmenuPatchMenuItem)
             if self.virtual_dat.FindAllLotsFromBuilding(self.exemplar):
                 menu.Append(self.popupID41, popupPropertyMenuItem41)
             if _can_create_growable_lot(
@@ -3864,22 +4061,6 @@ class NoteBookPanel(wx.Panel):
         self.parent.SetPageText(self.parent.currentPage, self.descriptor.name)
         self.parent.parent.listItems.Refresh()
 
-    def OnNewSubmenu(self, _event):
-        """Author a submenu, seeding its icon from this building's own icon."""
-        source_icon = None
-        icon_entry = self.virtual_dat.getEntry(_PNG_ICON_TYPE, _PIM_RESOURCE_GROUP, self.exemplar.entry.tgi[2])
-        if icon_entry is not None:
-            try:
-                if icon_entry.content is None:
-                    icon_entry.read_file(None, True, True)
-                cIO = io.BytesIO(icon_entry.content)
-                source_icon = Image.open(cIO).convert('RGB').crop((0, 0, 44, 44))
-                cIO.close()
-            except Exception:
-                source_icon = None
-
-        create_submenu_flow(self, self.parent.parent, self.virtual_dat, source_icon=source_icon)
-
     def OnPatchIntoSubmenu(self, _event):
         """Patch items into a submenu, pre-selecting the exemplar on this page."""
         from .SC4SubmenuPatchDlg import PatchTarget
@@ -3892,9 +4073,6 @@ class NoteBookPanel(wx.Panel):
             seed = PatchTarget("flora", self.exemplar, self.descriptor.name)
 
         patch_into_submenu_flow(self, self.parent.parent, self.virtual_dat, seed=seed)
-
-    def OnShowSubmenuTree(self, _event):
-        open_submenu_tree_view(self.parent.parent, self.virtual_dat)
 
     def _write_occupant_groups(self, ogs):
         prop = CreateAProp(self.virtual_dat.properties[2854081430], tuple(sorted(set(ogs))))
@@ -5545,20 +5723,25 @@ class MainFrame(wx.Frame):
         menu1.AppendSeparator()
         menu1.Append(104, menuItem1_1)
         menuBar.Append(menu1, menuItem1)
-        # Submenu authoring is reachable from a building's property page too,
-        # but the tree viewer and the two authoring dialogs are plugin-wide
-        # tools, so they also get a top-level home that needs no open exemplar.
+        # Plugin-wide submenu tools need no open exemplar. Building-specific
+        # membership actions remain on the building context menu.
         submenuMenu = wx.Menu()
-        self.submenuTreeMenuItem = submenuMenu.Append(wx.ID_ANY, LEXSubmenuTreeMenuItem)
-        submenuMenu.AppendSeparator()
         self.newSubmenuMenuItem = submenuMenu.Append(wx.ID_ANY, LEXNewSubmenuMenuItem)
-        self.patchSubmenuMenuItem = submenuMenu.Append(wx.ID_ANY, LEXSubmenuPatchMenuItem)
+        assignmentMenu = wx.Menu()
+        self.exemplarBatchMenuItem = assignmentMenu.Append(
+            wx.ID_ANY, LEXSubmenuExemplarBatchMenuItem)
+        self.patchSubmenuMenuItem = assignmentMenu.Append(
+            wx.ID_ANY, LEXSubmenuBatchPatchMenuItem)
+        submenuMenu.AppendSubMenu(assignmentMenu, LEXSubmenuAssignMenuItem)
+        submenuMenu.AppendSeparator()
+        self.submenuTreeMenuItem = submenuMenu.Append(wx.ID_ANY, LEXSubmenuTreeMenuItem)
         menuBar.Append(submenuMenu, LEXSubmenuMenuTitle)
         self.SetMenuBar(menuBar)
         self.Bind(wx.EVT_MENU, self.OnQuit, id=104)
         self.Bind(wx.EVT_MENU, self.OnConfigure, id=201)
         self.Bind(wx.EVT_MENU, self.OnShowSubmenuTree, self.submenuTreeMenuItem)
         self.Bind(wx.EVT_MENU, self.OnNewSubmenu, self.newSubmenuMenuItem)
+        self.Bind(wx.EVT_MENU, self.OnBatchEditSubmenuExemplars, self.exemplarBatchMenuItem)
         self.Bind(wx.EVT_MENU, self.OnPatchIntoSubmenu, self.patchSubmenuMenuItem)
         # Every one of these reads the plugins index, so they stay off until
         # the scan has finished (see _set_core_ready).
@@ -6379,7 +6562,8 @@ class MainFrame(wx.Frame):
             len(self.virtualDAT.allTextures))
 
     def _set_submenu_tools_enabled(self, enabled):
-        for item in (self.submenuTreeMenuItem, self.newSubmenuMenuItem, self.patchSubmenuMenuItem):
+        for item in (self.submenuTreeMenuItem, self.newSubmenuMenuItem,
+                     self.exemplarBatchMenuItem, self.patchSubmenuMenuItem):
             item.Enable(enabled)
 
     def OnShowSubmenuTree(self, _event):
@@ -6387,6 +6571,9 @@ class MainFrame(wx.Frame):
 
     def OnNewSubmenu(self, _event):
         create_submenu_flow(self, self, self.virtualDAT)
+
+    def OnBatchEditSubmenuExemplars(self, _event):
+        exemplar_into_submenu_flow(self, self.virtualDAT)
 
     def OnPatchIntoSubmenu(self, _event):
         patch_into_submenu_flow(self, self, self.virtualDAT)

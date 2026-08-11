@@ -33,7 +33,9 @@ from .textutil import decode_sc4_text
 
 BUILDING_EXEMPLAR_TYPE = 0x6534284A
 COHORT_TYPE = 0x05342861
+EXEMPLAR_PATCH_GROUP = 0xB03697D1
 PNG_ICON_TYPE = 0x856DDBAC
+SUBMENU_BUTTON_GROUP = 0x2A3858E4
 SUBMENU_BUTTON_KIND = 0x28  # Exemplar Type: Submenu Button
 
 PROP_EXEMPLAR_TYPE = 0x10
@@ -195,7 +197,8 @@ def scan_menus(virtual_dat, force=False):
         return cached
     menus = {}
     for entry in virtual_dat.allEntries:
-        if entry.tgi[0] != BUILDING_EXEMPLAR_TYPE:
+        if (entry.tgi[0] != BUILDING_EXEMPLAR_TYPE
+                or entry.tgi[1] != SUBMENU_BUTTON_GROUP):
             continue
         exemplar = getattr(entry, "exemplar", None)
         if exemplar is None:
@@ -333,6 +336,9 @@ def menu_members(virtual_dat, force=False):
                                       via=VIA_EXEMPLAR, descriptor=descriptor))
 
     for entry in getattr(virtual_dat, "cohorts", ()) or ():
+        tgi = tuple(getattr(entry, "tgi", ()) or ())
+        if len(tgi) < 2 or (int(tgi[1]) & 0xFFFFFFFF) != EXEMPLAR_PATCH_GROUP:
+            continue
         exemplar = getattr(entry, "exemplar", None)
         if exemplar is None:
             continue

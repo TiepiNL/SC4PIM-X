@@ -1,7 +1,7 @@
 """Submenu Tree: one window that shows the whole Submenus-DLL menu hierarchy.
 
 Read-only browsing plus the actions that belong to a place in the tree --
-create a child submenu under the selected menu, patch items into it, or open a
+create a child submenu, assign items by either supported method, or open a
 member item's property page. The model lives in :mod:`SC4MenuScanner`; this
 module only renders it and forwards the actions the host frame supplies.
 
@@ -12,7 +12,7 @@ main window while editing, and its actions open their own modal dialogs on top.
 from __future__ import annotations
 
 import io
-from typing import Callable, Optional
+import typing
 
 import wx
 from PIL import Image
@@ -42,21 +42,23 @@ class SubmenuTreeActions:
 
     def __init__(
         self,
-        new_submenu: Optional[Callable[[Optional[int]], None]] = None,
-        add_items: Optional[Callable[[Optional[int]], None]] = None,
-        open_descriptor: Optional[Callable[[object], None]] = None,
-        open_menu: Optional[Callable[[tuple], None]] = None,
-        change_icon: Optional[Callable[[object], bool]] = None,
+        new_submenu: typing.Optional[typing.Callable[[typing.Optional[int]], None]] = None,
+        edit_exemplars: typing.Optional[typing.Callable[[typing.Optional[int]], None]] = None,
+        create_patch: typing.Optional[typing.Callable[[typing.Optional[int]], None]] = None,
+        open_descriptor: typing.Optional[typing.Callable[[object], None]] = None,
+        open_menu: typing.Optional[typing.Callable[[tuple], None]] = None,
+        change_icon: typing.Optional[typing.Callable[[object], bool]] = None,
     ):
         self.new_submenu = new_submenu
-        self.add_items = add_items
+        self.edit_exemplars = edit_exemplars
+        self.create_patch = create_patch
         self.open_descriptor = open_descriptor
         self.open_menu = open_menu
         self.change_icon = change_icon
 
 
 class SubmenuTreeDialog(wx.Dialog):
-    def __init__(self, parent, virtual_dat, actions: Optional[SubmenuTreeActions] = None, title=None):
+    def __init__(self, parent, virtual_dat, actions: typing.Optional[SubmenuTreeActions] = None, title=None):
         wx.Dialog.__init__(
             self, parent, -1, title or LEXSubmenuTreeTitle,
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
@@ -100,15 +102,18 @@ class SubmenuTreeDialog(wx.Dialog):
         actions_row = wx.BoxSizer(wx.HORIZONTAL)
         self.newButton = wx.Button(self, -1, LEXSubmenuTreeNewChild)
         set_button_icon(self.newButton, "plus")
-        self.addButton = wx.Button(self, -1, LEXSubmenuTreeAddItems)
-        set_button_icon(self.addButton, "list")
+        self.exemplarButton = wx.Button(self, -1, LEXSubmenuPostCreateExemplar)
+        set_button_icon(self.exemplarButton, "pencil")
+        self.patchButton = wx.Button(self, -1, LEXSubmenuPostCreatePatch)
+        set_button_icon(self.patchButton, "list")
         self.iconButton = wx.Button(self, -1, LEXSubmenuIconMenuItem)
         set_button_icon(self.iconButton, "photo")
         self.openButton = wx.Button(self, -1, LEXSubmenuTreeOpenItem)
         set_button_icon(self.openButton, "folder-open")
         self.copyButton = wx.Button(self, -1, LEXSubmenuTreeCopyId)
         set_button_icon(self.copyButton, "copy")
-        for button in (self.newButton, self.addButton, self.iconButton, self.openButton, self.copyButton):
+        for button in (self.newButton, self.exemplarButton, self.patchButton,
+                       self.iconButton, self.openButton, self.copyButton):
             actions_row.Add(button, 0, wx.RIGHT, 6)
         actions_row.AddStretchSpacer(1)
         closeButton = wx.Button(self, wx.ID_CLOSE, LEXSubmenuTreeClose)
@@ -133,7 +138,8 @@ class SubmenuTreeDialog(wx.Dialog):
         self.tree.Bind(wx.EVT_TREE_ITEM_ACTIVATED, self._on_activated)
         self.tree.Bind(wx.EVT_TREE_ITEM_RIGHT_CLICK, self._on_right_click)
         self.newButton.Bind(wx.EVT_BUTTON, self._on_new_submenu)
-        self.addButton.Bind(wx.EVT_BUTTON, self._on_add_items)
+        self.exemplarButton.Bind(wx.EVT_BUTTON, self._on_edit_exemplars)
+        self.patchButton.Bind(wx.EVT_BUTTON, self._on_create_patch)
         self.iconButton.Bind(wx.EVT_BUTTON, self._on_change_icon)
         self.openButton.Bind(wx.EVT_BUTTON, self._on_open_item)
         self.copyButton.Bind(wx.EVT_BUTTON, self._on_copy_id)
@@ -230,8 +236,9 @@ class SubmenuTreeDialog(wx.Dialog):
 
     def _member_label(self, member) -> str:
         kind = LEXSubmenuTreeKindFlora if member.kind == "flora" else LEXSubmenuTreeKindBuilding
-        if member.via == VIA_PATCH:
-            kind = "%s, %s" % (kind, LEXSubmenuTreeViaPatch)
+        assignment = (LEXSubmenuStatusAssignedPatch if member.via == VIA_PATCH
+                      else LEXSubmenuStatusAssignedExemplar)
+        kind = "%s, %s" % (kind, assignment)
         return "%s  [%s]" % (member.name, kind)
 
     def _rebuild(self) -> None:
@@ -329,7 +336,7 @@ class SubmenuTreeDialog(wx.Dialog):
             return None, None
         return data
 
-    def _selected_menu_id(self) -> Optional[int]:
+    def _selected_menu_id(self) -> typing.Optional[int]:
         """Button ID to act on: the selected menu, or a selected item's menu."""
         if self._closing or self._rebuilding:
             return None
@@ -370,13 +377,15 @@ class SubmenuTreeDialog(wx.Dialog):
             elif kind == "member":
                 self.details.SetLabel(LEXSubmenuTreeDetailItem % (
                     payload.name, "0x%08X, 0x%08X, 0x%08X" % payload.tgi,
-                    LEXSubmenuTreeViaPatch if payload.via == VIA_PATCH else LEXSubmenuTreeViaExemplar,
+                    LEXSubmenuStatusAssignedPatch if payload.via == VIA_PATCH
+                    else LEXSubmenuStatusAssignedExemplar,
                 ))
             else:
                 self.details.SetLabel(payload.label if payload is not None else LEXSubmenuTreeDetailNone)
         menu_id = self._selected_menu_id()
         self.newButton.Enable(self.actions.new_submenu is not None)
-        self.addButton.Enable(self.actions.add_items is not None and menu_id is not None)
+        self.exemplarButton.Enable(self.actions.edit_exemplars is not None and menu_id is not None)
+        self.patchButton.Enable(self.actions.create_patch is not None and menu_id is not None)
         self.iconButton.Enable(self._icon_editable() is not None)
         self.openButton.Enable(self._openable() is not None)
         self.copyButton.Enable(has_menu)
@@ -442,8 +451,10 @@ class SubmenuTreeDialog(wx.Dialog):
         ids = {}
         for label, handler, enabled in (
             (LEXSubmenuTreeNewChild, self._on_new_submenu, self.actions.new_submenu is not None),
-            (LEXSubmenuTreeAddItems, self._on_add_items,
-             self.actions.add_items is not None and self._selected_menu_id() is not None),
+            (LEXSubmenuPostCreateExemplar, self._on_edit_exemplars,
+             self.actions.edit_exemplars is not None and self._selected_menu_id() is not None),
+            (LEXSubmenuPostCreatePatch, self._on_create_patch,
+             self.actions.create_patch is not None and self._selected_menu_id() is not None),
             (LEXSubmenuIconMenuItem, self._on_change_icon, self._icon_editable() is not None),
             (LEXSubmenuTreeOpenItem, self._on_open_item, self.openButton.IsEnabled()),
             (LEXSubmenuTreeCopyId, self._on_copy_id, self.copyButton.IsEnabled()),
@@ -463,10 +474,18 @@ class SubmenuTreeDialog(wx.Dialog):
         if hasattr(event, "Skip"):
             event.Skip()
 
-    def _on_add_items(self, event):
+    def _on_edit_exemplars(self, event):
         menu_id = self._selected_menu_id()
-        if self.actions.add_items is not None and menu_id is not None:
-            self.actions.add_items(menu_id)
+        if self.actions.edit_exemplars is not None and menu_id is not None:
+            self.actions.edit_exemplars(menu_id)
+            self.Reload(force=True)
+        if hasattr(event, "Skip"):
+            event.Skip()
+
+    def _on_create_patch(self, event):
+        menu_id = self._selected_menu_id()
+        if self.actions.create_patch is not None and menu_id is not None:
+            self.actions.create_patch(menu_id)
             self.Reload(force=True)
         if hasattr(event, "Skip"):
             event.Skip()
@@ -500,7 +519,7 @@ class SubmenuTreeDialog(wx.Dialog):
             event.Skip()
 
 
-def open_submenu_tree(parent, virtual_dat, actions: Optional[SubmenuTreeActions] = None):
+def open_submenu_tree(parent, virtual_dat, actions: typing.Optional[SubmenuTreeActions] = None):
     """Show the tree, reusing the window if it is already open on ``parent``."""
     existing = getattr(parent, "_submenu_tree_dialog", None)
     if existing:

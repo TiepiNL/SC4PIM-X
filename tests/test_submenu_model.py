@@ -6,6 +6,7 @@ from sc4pimx.SC4MenuScanner import (
     BUILDING_EXEMPLAR_TYPE,
     CATEGORY_BUILDING,
     CATEGORY_FLORA,
+    EXEMPLAR_PATCH_GROUP,
     KIND_MENU,
     KIND_ORPHAN,
     KIND_ROOT,
@@ -19,6 +20,7 @@ from sc4pimx.SC4MenuScanner import (
     PROP_ITEM_SUBMENU_PARENT_ID,
     SOURCE_BUILTIN,
     SOURCE_SCANNED,
+    SUBMENU_BUTTON_GROUP,
     SUBMENU_BUTTON_KIND,
     VIA_EXEMPLAR,
     VIA_PATCH,
@@ -76,7 +78,7 @@ def _descriptor(name, exemplar):
 
 
 def _menu_button(value, parent, name, order=0, iid=None):
-    tgi = (BUILDING_EXEMPLAR_TYPE, 0x1234, iid if iid is not None else value)
+    tgi = (BUILDING_EXEMPLAR_TYPE, SUBMENU_BUTTON_GROUP, iid if iid is not None else value)
     exemplar = FakeExemplar({
         0x10: [SUBMENU_BUTTON_KIND],
         PROP_ITEM_BUTTON_ID: [value],
@@ -85,6 +87,15 @@ def _menu_button(value, parent, name, order=0, iid=None):
         PROP_EXEMPLAR_NAME: [name],
     }, tgi=tgi)
     return _entry(tgi, exemplar)
+
+
+def test_scan_menus_ignores_submenu_properties_outside_button_group():
+    button = _menu_button(0xB0000001, 0xAAAA0001, "Fountains")
+    button.tgi = (BUILDING_EXEMPLAR_TYPE, 0x11111111, 0xB0000001)
+    button.exemplar.entry = button
+    dat = FakeDat(all_entries=[button])
+
+    assert scan_menus(dat) == {}
 
 
 # -- discovery ---------------------------------------------------------------
@@ -293,7 +304,9 @@ def test_menu_members_includes_patch_cohorts_and_resolves_names():
         PROP_EXEMPLAR_PATCH_TARGETS: [0x10, 0x101, 0x10, 0x999],
         PROP_BUILDING_SUBMENUS: [0xAAAA0002],
     })
-    dat.cohorts.append(SimpleNamespace(tgi=(0x05342861, 1, 1), exemplar=cohort))
+    dat.cohorts.append(SimpleNamespace(
+        tgi=(0x05342861, EXEMPLAR_PATCH_GROUP, 1), exemplar=cohort,
+    ))
 
     members = menu_members(dat)
     patched = {m.name: m for m in members[0xAAAA0002] if m.via == VIA_PATCH}
@@ -309,7 +322,9 @@ def test_menu_members_does_not_double_list_an_already_assigned_item():
         PROP_EXEMPLAR_PATCH_TARGETS: [0x10, 0x100],
         PROP_BUILDING_SUBMENUS: [0xAAAA0001],
     })
-    dat.cohorts.append(SimpleNamespace(tgi=(0x05342861, 1, 1), exemplar=cohort))
+    dat.cohorts.append(SimpleNamespace(
+        tgi=(0x05342861, EXEMPLAR_PATCH_GROUP, 1), exemplar=cohort,
+    ))
 
     assert [m.name for m in menu_members(dat)[0xAAAA0001]] == ["Shed", "Tower", "Palm"]
 
@@ -322,6 +337,17 @@ def test_menu_members_ignores_cohorts_that_are_not_submenu_patches():
     ))
 
     assert len(menu_members(dat)[0xAAAA0001]) == 3
+
+
+def test_menu_members_ignores_patch_properties_outside_patch_group():
+    dat = _dat_with_items()
+    cohort = FakeExemplar({
+        PROP_EXEMPLAR_PATCH_TARGETS: [0x10, 0x101],
+        PROP_BUILDING_SUBMENUS: [0xAAAA0002],
+    })
+    dat.cohorts.append(SimpleNamespace(tgi=(0x05342861, 0x11111111, 1), exemplar=cohort))
+
+    assert all(member.via != VIA_PATCH for member in menu_members(dat)[0xAAAA0002])
 
 
 # -- icons -------------------------------------------------------------------

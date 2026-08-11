@@ -6,8 +6,9 @@ Uint32 submenu button IDs used by the Submenus DLL.
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import dataclass
-from typing import Iterable, Optional
+import typing
 
 import wx
 import wx.lib.agw.ultimatelistctrl as ULC
@@ -104,9 +105,9 @@ class BuildingSubmenuPickerDialog(wx.Dialog):
         self,
         parent: wx.Window,
         virtual_dat,
-        current_submenus: Iterable[int],
-        candidates: Optional[Iterable[int]] = None,
-        title: Optional[str] = None,
+        current_submenus: typing.Iterable[builtins.int],
+        candidates: typing.Iterable[builtins.int] | None = None,
+        title: typing.Optional[str] = None,
         preserve_unlisted: bool = True,
         allow_manual: bool = True,
     ):
@@ -186,11 +187,15 @@ class BuildingSubmenuPickerDialog(wx.Dialog):
             add_row.Add(self.addButton, 0)
 
         btns = wx.StdDialogButtonSizer()
+        self.okButton.SetLabel(LEXBuildingSubmenuApplyToExemplar)
         btns.AddButton(self.okButton)
         btns.AddButton(cancelButton)
         btns.Realize()
 
         sizer = wx.BoxSizer(wx.VERTICAL)
+        help_text = wx.StaticText(self, -1, LEXBuildingSubmenuDirectHelp)
+        help_text.Wrap(640)
+        sizer.Add(help_text, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 8)
         sizer.Add(top, 0, wx.EXPAND | wx.ALL, 8)
         sizer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         sizer.Add(self.countText, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
@@ -376,12 +381,12 @@ class BuildingSubmenuPickerDialog(wx.Dialog):
 def pick_building_submenus(
     parent: wx.Window,
     virtual_dat,
-    current_submenus: Iterable[int],
-    candidates: Optional[Iterable[int]] = None,
-    title: Optional[str] = None,
+    current_submenus: typing.Iterable[builtins.int],
+    candidates: typing.Iterable[builtins.int] | None = None,
+    title: typing.Optional[str] = None,
     preserve_unlisted: bool = True,
     allow_manual: bool = True,
-) -> Optional[list[int]]:
+) -> list[builtins.int] | None:
     dlg = BuildingSubmenuPickerDialog(
         parent,
         virtual_dat,

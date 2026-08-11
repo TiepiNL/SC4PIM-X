@@ -42,3 +42,46 @@ def test_main_app_keeps_translation_catalog_module_binding():
     from sc4pimx import SC4PIMApp
 
     assert SC4PIMApp.translation_catalog.DEFAULT_LANGUAGE == "en"
+
+
+def test_submenu_workflow_labels_exist_in_every_bundled_language():
+    root = Path(__file__).resolve().parents[1]
+    required = {
+        "LEXBuildingSubmenuMenuItem",
+        "LEXBuildingSubmenuPickerTitle",
+        "LEXBuildingSubmenuDirectHelp",
+        "LEXBuildingSubmenuApplyToExemplar",
+        "LEXNewSubmenuMenuItem",
+        "LEXSubmenuPatchMenuItem",
+        "LEXSubmenuBatchPatchMenuItem",
+        "LEXSubmenuPatchDialogTitle",
+        "LEXSubmenuPatchHelp",
+        "LEXSubmenuPatchCreateButton",
+        "LEXSubmenuTreeMenuItem",
+        "LEXSubmenuAssignMenuItem",
+        "LEXSubmenuExemplarBatchMenuItem",
+        "LEXSubmenuExemplarBatchDialogTitle",
+        "LEXSubmenuExemplarBatchHelp",
+        "LEXSubmenuExemplarCreateBackups",
+        "LEXSubmenuExemplarUpdateButton",
+        "LEXSubmenuAssignmentColPackage",
+        "LEXSubmenuStatusAssignedExemplar",
+        "LEXSubmenuStatusAssignedPatch",
+        "LEXSubmenuStatusAssignedBoth",
+        "LEXSubmenuStatusCannotModify",
+        "LEXSubmenuExemplarConfirm",
+        "LEXSubmenuExemplarResultSuccess",
+        "LEXSubmenuPostCreateTitle",
+        "LEXSubmenuPostCreateHelp",
+        "LEXSubmenuPostCreateExemplar",
+        "LEXSubmenuPostCreatePatch",
+        "LEXSubmenuPostCreateDone",
+        "LEXNewSubmenuOccupantGroupCollision",
+    }
+
+    for language in ("en", "de", "fr", "es"):
+        with open(root / "assets/lang" / (language + ".toml"), "rb") as handle:
+            catalog = tomllib.load(handle)["strings"]
+        assert required <= catalog.keys()
+        assert all(catalog[key].strip() for key in required)
+        assert catalog["LEXSubmenuPatchMenuItem"] != catalog["LEXSubmenuBatchPatchMenuItem"]

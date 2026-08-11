@@ -19,6 +19,7 @@ from sc4pimx.SC4PIMApp import (
     _converted_lot_row_values,
     _override_output_directory,
     _source_building_candidates,
+    _used_occupant_group_ids,
 )
 
 
@@ -130,6 +131,32 @@ def test_iid_allocator_checks_every_resource_prefix():
     )
 
     assert result == 0x300
+
+
+def test_iid_allocator_skips_forbidden_occupant_group_ids():
+    virtual_dat = SimpleNamespace(getEntry=lambda _t, _g, _i: None)
+    candidates = iter((0x100, 0x200))
+
+    result = _allocate_conversion_iid(
+        virtual_dat,
+        ((0x6534284A, 0x2A3858E4),),
+        candidate_factory=lambda: next(candidates),
+        forbidden_ids={0x100},
+    )
+
+    assert result == 0x200
+
+
+def test_used_occupant_group_ids_includes_catalog_and_loaded_values():
+    catalog = SimpleNamespace(Options={0x1006: "Parks"})
+    exemplar = SimpleNamespace(GetProp=lambda prop_id: [0xDEADBEEF]
+                               if prop_id == 0xAA1DD396 else None)
+    virtual_dat = SimpleNamespace(
+        properties={0xAA1DD396: catalog},
+        allEntries=[SimpleNamespace(exemplar=exemplar)],
+    )
+
+    assert _used_occupant_group_ids(virtual_dat) == {0x1006, 0xDEADBEEF}
 
 
 def test_override_reuses_original_pair_tgis_but_clone_uses_author_gid_and_new_iid():
