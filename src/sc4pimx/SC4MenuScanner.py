@@ -34,6 +34,7 @@ from .textutil import decode_sc4_text
 BUILDING_EXEMPLAR_TYPE = 0x6534284A
 COHORT_TYPE = 0x05342861
 PNG_ICON_TYPE = 0x856DDBAC
+SUBMENU_BUTTON_KIND = 0x28  # Exemplar Type: Submenu Button
 
 PROP_EXEMPLAR_TYPE = 0x10
 PROP_EXEMPLAR_NAME = 0x20
@@ -198,6 +199,9 @@ def scan_menus(virtual_dat, force=False):
             continue
         exemplar = getattr(entry, "exemplar", None)
         if exemplar is None:
+            continue
+        exemplar_type = exemplar.GetProp(PROP_EXEMPLAR_TYPE)
+        if not exemplar_type or exemplar_type[0] != SUBMENU_BUTTON_KIND:
             continue
         parent = exemplar.GetProp(PROP_ITEM_SUBMENU_PARENT_ID)
         if not parent:
