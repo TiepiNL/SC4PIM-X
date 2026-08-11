@@ -69,6 +69,7 @@ class SubmenuTreeDialog(wx.Dialog):
         # fires EVT_TREE_SEL_CHANGED at a control whose C++ side is already
         # gone. Nothing selection-related may run once this is set.
         self._closing = False
+        self._rebuilding = False
 
         top = wx.BoxSizer(wx.HORIZONTAL)
         self.search = wx.SearchCtrl(self, -1, style=wx.TE_PROCESS_ENTER)
@@ -138,12 +139,36 @@ class SubmenuTreeDialog(wx.Dialog):
         self.copyButton.Bind(wx.EVT_BUTTON, self._on_copy_id)
         closeButton.Bind(wx.EVT_BUTTON, lambda _evt: self.Close())
         self.Bind(wx.EVT_CLOSE, self._on_close)
+        self.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
 
         self.Reload()
 
     def _on_close(self, event):
-        self._closing = True
+        self._deactivate_tree_events()
         event.Skip()
+
+    def _on_destroy(self, event):
+        if event.GetEventObject() is self:
+            self._deactivate_tree_events()
+        event.Skip()
+
+    def _deactivate_tree_events(self):
+        """Stop native tree callbacks before wx starts deleting its children."""
+        if self._closing:
+            return
+        self._closing = True
+        tree = getattr(self, "tree", None)
+        if tree is None:
+            return
+        for event_type in (
+            wx.EVT_TREE_SEL_CHANGED,
+            wx.EVT_TREE_ITEM_ACTIVATED,
+            wx.EVT_TREE_ITEM_RIGHT_CLICK,
+        ):
+            try:
+                tree.Unbind(event_type)
+            except RuntimeError:
+                break
 
     # -- data ---------------------------------------------------------------
 
@@ -214,6 +239,7 @@ class SubmenuTreeDialog(wx.Dialog):
         searching = bool(self.search.GetValue().strip())
         roots = build_menu_tree(self._entries, ungrouped_label=LEXSubmenuTreeUngrouped,
                                 orphan_label=LEXSubmenuTreeOrphan)
+        self._rebuilding = True
         self.tree.Freeze()
         try:
             self.tree.DeleteAllItems()
@@ -232,7 +258,12 @@ class SubmenuTreeDialog(wx.Dialog):
                     self.tree.Expand(child)
                     child, cookie = self.tree.GetNextChild(root_id, cookie)
         finally:
-            self.tree.Thaw()
+            try:
+                self.tree.Thaw()
+            finally:
+                self._rebuilding = False
+        if self._closing:
+            return
         self.countText.SetLabel(LEXSubmenuTreeCount % (self._menu_count, self._item_count))
         self._update_details(None)
 
@@ -280,7 +311,7 @@ class SubmenuTreeDialog(wx.Dialog):
     # -- selection ----------------------------------------------------------
 
     def _selected_data(self):
-        if self._closing:
+        if self._closing or self._rebuilding:
             return None, None
         # _closing only catches this dialog's own Close()/Destroy() path.
         # On Windows the native tree control can still fire a selection
@@ -300,7 +331,7 @@ class SubmenuTreeDialog(wx.Dialog):
 
     def _selected_menu_id(self) -> Optional[int]:
         """Button ID to act on: the selected menu, or a selected item's menu."""
-        if self._closing:
+        if self._closing or self._rebuilding:
             return None
         try:
             item = self.tree.GetSelection()
@@ -314,7 +345,8 @@ class SubmenuTreeDialog(wx.Dialog):
         return None
 
     def _on_selection(self, event):
-        if self._closing:
+        if self._closing or self._rebuilding:
+            event.Skip()
             return
         kind, payload = self._selected_data()
         self._update_details((kind, payload) if kind else None)
@@ -488,7 +520,7 @@ def open_submenu_tree(parent, virtual_dat, actions: Optional[SubmenuTreeActions]
         # Bound after the dialog's own EVT_CLOSE handler, so this one runs
         # first: set the flag here too or the selection events the imminent
         # Destroy() fires would still reach a half-dead tree.
-        dlg._closing = True
+        dlg._deactivate_tree_events()
         try:
             if getattr(parent, "_submenu_tree_dialog", None) is dlg:
                 parent._submenu_tree_dialog = None
