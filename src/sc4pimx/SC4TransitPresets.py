@@ -458,6 +458,8 @@ class PresetWizardDialog(wx.Dialog):
 
         self.statusText = wx.StaticText(self, -1, "")
         self.statusText.SetForegroundColour(wx.Colour(160, 0, 0))
+        self._status_label = ""
+        self._wrap_width = 0
 
         self.applyButton = wx.Button(self, wx.ID_OK, LEXTransitPresetApply)
         self.applyButton.SetDefault()
@@ -507,6 +509,7 @@ class PresetWizardDialog(wx.Dialog):
         self.costText.Bind(wx.EVT_TEXT, self._on_changed)
         self.capacityText.Bind(wx.EVT_TEXT, self._on_changed)
         self.Bind(wx.EVT_BUTTON, self._on_apply, id=wx.ID_OK)
+        self.Bind(wx.EVT_SIZE, self._on_size)
 
         self._appliedCount = 0
         self._refresh_base_dependent()
@@ -622,7 +625,7 @@ class PresetWizardDialog(wx.Dialog):
             )
         except Exception as e:
             logger.exception("Preset eval failed for %s", registry_preset.id)
-            self.statusText.SetLabel(LEXTransitPresetEvalError % e)
+            self._set_status(LEXTransitPresetEvalError % e)
             return None
         rows = tsw.decode_switch_array(registry_preset.switches)
         lines = _replace_tsec_lines(self.virtual_dat, base_lines, rows)
@@ -650,6 +653,40 @@ class PresetWizardDialog(wx.Dialog):
             and (parsed[0] not in blank_prop_ids or parsed[0] in manual_prop_ids)
         ]
 
+    def _set_status(self, label: str) -> None:
+        if label == self._status_label:
+            return
+        self._status_label = label
+        self._wrap_footer(force=True)
+
+    def _wrap_footer(self, force: bool = False) -> None:
+        """Re-wrap the note/status labels to the current width and grow the
+        dialog if they got taller. The dialog is fitted while both are still
+        empty, so without this the extra lines are clipped by the footer.
+        """
+        width = max(420, self.GetClientSize().width - 24)
+        if width == self._wrap_width and not force:
+            return
+        self._wrap_width = width
+        for text, label in ((self.noteText, self._note_label), (self.statusText, self._status_label)):
+            text.SetLabel(label)
+            if label:
+                text.Wrap(width)
+        self.Layout()
+
+        sizer = self.GetSizer()
+        if sizer is None:
+            return
+        sizer.SetSizeHints(self)
+        fitting = sizer.ComputeFittingWindowSize(self)
+        if fitting.height > self.GetSize().height:
+            self.SetSize(self.GetSize().width, fitting.height)
+            self.Layout()
+
+    def _on_size(self, event: wx.Event) -> None:
+        event.Skip()
+        self._wrap_footer()
+
     def _refresh_note(self) -> None:
         parts = []
         base = self._selected_base()
@@ -664,10 +701,7 @@ class PresetWizardDialog(wx.Dialog):
         if label == self._note_label:
             return
         self._note_label = label
-        self.noteText.SetLabel(label)
-        if label:
-            self.noteText.Wrap(max(420, self.GetClientSize().width - 24))
-        self.Layout()
+        self._wrap_footer(force=True)
 
     def _refresh_preview(self) -> None:
         self._refresh_note()
@@ -679,16 +713,16 @@ class PresetWizardDialog(wx.Dialog):
         if self._scope is None:
             self.previewList.DeleteAllItems()
             self.occupantGroupsText.SetLabel(LEXTransitPresetNotApplicable)
-            self.statusText.SetLabel(LEXTransitPresetNotApplicable)
+            self._set_status(LEXTransitPresetNotApplicable)
             self.applyButton.Enable(False)
             return
         if self._selected_registry_preset() is None:
             self.previewList.DeleteAllItems()
             self.occupantGroupsText.SetLabel("")
-            self.statusText.SetLabel(self._missing_combination_message())
+            self._set_status(self._missing_combination_message())
             self.applyButton.Enable(False)
             return
-        self.statusText.SetLabel("")
+        self._set_status("")
         lines = self._generate_lines()
         if lines is None:
             self.previewList.DeleteAllItems()
@@ -827,7 +861,7 @@ class PresetWizardDialog(wx.Dialog):
             tpr.label_for_base(registry_preset.base),
             tpr.label_for_placement(registry_preset.placement),
         )
-        self.statusText.SetLabel(LEXTransitPresetApplied % (label, written))
+        self._set_status(LEXTransitPresetApplied % (label, written))
         event.Skip()
 
     # --- public --------------------------------------------------------
