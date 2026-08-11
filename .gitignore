@@ -65,3 +65,4 @@ ImageDBLarge
 # LLM stuff
 .agents
 .claude
+.codex
