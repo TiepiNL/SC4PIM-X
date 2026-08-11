@@ -229,6 +229,23 @@ def _new_exemplar_entry(tgi, file_name, virtual_dat, content=None):
     return entry
 
 
+def _new_populated_exemplar_entry(tgi, file_name, virtual_dat, props, cohort=False):
+    """Create a normalized binary exemplar/cohort from property text lines."""
+    signature = 'CQZT1###' if cohort else 'EQZT1###'
+    content = (
+        signature + '\r\n'
+        'ParentCohort=Key:{0x00000000,0x00000000,0x00000000}\r\n'
+        'PropCount=0x00000000\r\n'
+    )
+    entry = _new_exemplar_entry(tgi, file_name, virtual_dat, content=content)
+    for prop in props:
+        entry.exemplar.AddTextProp(prop)
+    if cohort:
+        entry.exemplar.sig = 'CQZB1###'
+    entry.exemplar.Maj()
+    return entry
+
+
 def _clone_exemplar_entry(source_exemplar, tgi, file_name, virtual_dat):
     return _new_exemplar_entry(tgi, file_name, virtual_dat, source_exemplar.Rep())
 
@@ -664,10 +681,9 @@ def create_submenu_flow(window, frame, virtual_dat, source_icon=None, parent_id=
         entries.append(desc_entry)
         props.append(CreateAProp(virtual_dat.properties[0xCA416AB5], desc_ltext_tgi))
 
-    props.sort(key=functools.cmp_to_key(lambda x, y: basic_cmp(x[2:2 + 8], y[2:2 + 8])))
-    buffer = 'EQZT1###\r\n' + 'ParentCohort=Key:{0x00000000,0x00000000,0x00000000}\r\n' + 'PropCount=0x%08x\r\n' % len(props)
-    buffer += '\r\n'.join(props)
-    submenu_entry = _new_exemplar_entry(building_tgi, file_name, virtual_dat, content=buffer)
+    submenu_entry = _new_populated_exemplar_entry(
+        building_tgi, file_name, virtual_dat, props,
+    )
     entries.append(submenu_entry)
 
     _write_entries_atomic(file_name, entries)
@@ -720,11 +736,10 @@ def patch_into_submenu_flow(window, frame, virtual_dat, seed=None, parent_id=Non
     patched_count = 0
 
     def build_cohort(iid, props):
-        props = sorted(props, key=functools.cmp_to_key(lambda x, y: basic_cmp(x[2:2 + 8], y[2:2 + 8])))
-        buffer = 'CQZT1###\r\n' + 'ParentCohort=Key:{0x00000000,0x00000000,0x00000000}\r\n' + 'PropCount=0x%08x\r\n' % len(props)
-        buffer += '\r\n'.join(props)
         tgi = (_COHORT_TYPE, frame.GID, iid)
-        return _new_exemplar_entry(tgi, file_name, virtual_dat, content=buffer)
+        return _new_populated_exemplar_entry(
+            tgi, file_name, virtual_dat, props, cohort=True,
+        )
 
     if building_targets:
         entries.append(build_cohort(first_id, [
