@@ -19,6 +19,7 @@ from sc4pimx.SC4MenuScanner import (
     PROP_ITEM_SUBMENU_PARENT_ID,
     SOURCE_BUILTIN,
     SOURCE_SCANNED,
+    SUBMENU_BUTTON_KIND,
     VIA_EXEMPLAR,
     VIA_PATCH,
     MenuEntry,
@@ -77,6 +78,7 @@ def _descriptor(name, exemplar):
 def _menu_button(value, parent, name, order=0, iid=None):
     tgi = (BUILDING_EXEMPLAR_TYPE, 0x1234, iid if iid is not None else value)
     exemplar = FakeExemplar({
+        0x10: [SUBMENU_BUTTON_KIND],
         PROP_ITEM_BUTTON_ID: [value],
         PROP_ITEM_SUBMENU_PARENT_ID: [parent],
         PROP_ITEM_ORDER: [order],
@@ -116,7 +118,16 @@ def test_scan_menus_finds_button_exemplars_and_caches():
 
 def test_scan_menus_skips_non_menu_exemplars():
     plain = FakeExemplar({PROP_EXEMPLAR_NAME: ["Some Building"]}, tgi=(BUILDING_EXEMPLAR_TYPE, 1, 2))
-    dat = FakeDat(all_entries=[_entry(plain.entry.tgi, plain), _entry((0x1234, 1, 2), None)])
+    item = FakeExemplar({
+        0x10: [2],
+        PROP_ITEM_SUBMENU_PARENT_ID: [0xAAAA0001],
+        PROP_ITEM_BUTTON_ID: [0xB0000001],
+    }, tgi=(BUILDING_EXEMPLAR_TYPE, 1, 3))
+    dat = FakeDat(all_entries=[
+        _entry(plain.entry.tgi, plain),
+        _entry(item.entry.tgi, item),
+        _entry((0x1234, 1, 2), None),
+    ])
 
     assert scan_menus(dat) == {}
 
