@@ -40,6 +40,27 @@ logger = logging.getLogger(__name__)
 
 PRESET_TYPE_TRANSIT = "Transit"
 
+
+def _make_wrapping_label(parent: wx.Window, lines: int = 5) -> wx.TextCtrl:
+    """A label that word-wraps to whatever width the sizer gives it.
+
+    ``wx.StaticText`` only wraps where ``Wrap()`` put hard breaks, so it has
+    to be re-wrapped on every resize -- and re-wrapping to the live width
+    feeds the label's best size back into the dialog size, which loops. A
+    read-only borderless multiline ``TextCtrl`` wraps itself at its own
+    width, so nothing feeds back. Height is fixed at ``lines``; longer text
+    scrolls rather than resizing the dialog.
+    """
+    ctrl = wx.TextCtrl(
+        parent,
+        -1,
+        "",
+        style=wx.TE_MULTILINE | wx.TE_READONLY | wx.BORDER_NONE,
+    )
+    ctrl.SetBackgroundColour(parent.GetBackgroundColour())
+    ctrl.SetMinSize((-1, ctrl.GetCharHeight() * lines + 4))
+    return ctrl
+
 PROP_OCCUPANT_GROUPS = 0xAA1DD396
 
 # The only properties the wizard writes back. The category pipeline still has
@@ -453,13 +474,12 @@ class PresetWizardDialog(wx.Dialog):
         self.occupantGroupsText = wx.StaticText(self, -1, "")
 
         # Authored base/preset notes from transit_switch_presets.toml.
-        self.noteText = wx.StaticText(self, -1, "")
+        self.noteText = _make_wrapping_label(self, 6)
         self._note_label = ""
 
-        self.statusText = wx.StaticText(self, -1, "")
+        self.statusText = _make_wrapping_label(self, 2)
         self.statusText.SetForegroundColour(wx.Colour(160, 0, 0))
         self._status_label = ""
-        self._wrap_width = 0
 
         self.applyButton = wx.Button(self, wx.ID_OK, LEXTransitPresetApply)
         self.applyButton.SetDefault()
@@ -509,7 +529,6 @@ class PresetWizardDialog(wx.Dialog):
         self.costText.Bind(wx.EVT_TEXT, self._on_changed)
         self.capacityText.Bind(wx.EVT_TEXT, self._on_changed)
         self.Bind(wx.EVT_BUTTON, self._on_apply, id=wx.ID_OK)
-        self.Bind(wx.EVT_SIZE, self._on_size)
 
         self._appliedCount = 0
         self._refresh_base_dependent()
@@ -657,35 +676,7 @@ class PresetWizardDialog(wx.Dialog):
         if label == self._status_label:
             return
         self._status_label = label
-        self._wrap_footer(force=True)
-
-    def _wrap_footer(self, force: bool = False) -> None:
-        """Re-wrap the note/status labels to the current width and grow the
-        dialog if they got taller. The dialog is fitted while both are still
-        empty, so without this the extra lines are clipped by the footer.
-        """
-        width = max(420, self.GetClientSize().width - 24)
-        if width == self._wrap_width and not force:
-            return
-        self._wrap_width = width
-        for text, label in ((self.noteText, self._note_label), (self.statusText, self._status_label)):
-            text.SetLabel(label)
-            if label:
-                text.Wrap(width)
-        self.Layout()
-
-        sizer = self.GetSizer()
-        if sizer is None:
-            return
-        sizer.SetSizeHints(self)
-        fitting = sizer.ComputeFittingWindowSize(self)
-        if fitting.height > self.GetSize().height:
-            self.SetSize(self.GetSize().width, fitting.height)
-            self.Layout()
-
-    def _on_size(self, event: wx.Event) -> None:
-        event.Skip()
-        self._wrap_footer()
+        self.statusText.ChangeValue(label)
 
     def _refresh_note(self) -> None:
         parts = []
@@ -701,7 +692,7 @@ class PresetWizardDialog(wx.Dialog):
         if label == self._note_label:
             return
         self._note_label = label
-        self._wrap_footer(force=True)
+        self.noteText.ChangeValue(label)
 
     def _refresh_preview(self) -> None:
         self._refresh_note()
