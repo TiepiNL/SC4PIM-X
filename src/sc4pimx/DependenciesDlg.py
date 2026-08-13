@@ -38,6 +38,10 @@ IGNORED_SOUND_IIDS = {0x8A8B7DD1, 0x2A8B7DB4}
 
 BUILTIN_GAME_FILES = {"cohorts.dat", "ep1.dat", "merged.dat", "simcitylocale.dat", "sound.dat"}
 
+# Bundled with SC4PIM itself and loaded before anything else, so it shadows
+# nothing the user actually installed and can never be a dependency.
+TOOL_ASSET_FILES = {"cohorts.dat"}
+
 
 _STATUS_SORT_KEY = {"missing": 0, "found": 1, "ignored": 2}
 
@@ -46,6 +50,7 @@ _FILTER_KEYS = (
     ("missing", DepDlgFilterMissing),
     ("catalog", DepDlgFilterCatalog),
     ("found", DepDlgFilterFound),
+    ("overridden", DepDlgFilterOverridden),
     ("unmatched", DepDlgFilterUnmatched),
     ("ignored", DepDlgFilterIgnored),
     ("models", DepDlgFilterModels),
@@ -94,6 +99,10 @@ def _row_sort_key(row):
 
 def _hex32(v):
     return "0x%08X" % (int(v) & 0xFFFFFFFF)
+
+
+def is_tool_asset_file(file_name):
+    return os.path.basename(str(file_name or "")).lower() in TOOL_ASSET_FILES
 
 
 def is_builtin_game_file(file_name):
@@ -150,6 +159,7 @@ class DependencyRow:
     catalog_matches: list[dict] = field(default_factory=list)
     catalog_name: str = ""
     catalog_match_reason: str = ""
+    candidates: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -330,6 +340,93 @@ def row_catalog_state_text(row):
     return ""
 
 
+def _best_cover(candidate_lists):
+    counts = {}
+    rank = {}
+    for names in candidate_lists:
+        for pos, name in enumerate(names):
+            counts[name] = counts.get(name, 0) + 1
+            rank[name] = min(rank.get(name, pos), pos)
+    return min(counts, key=lambda name: (-counts[name], rank[name], name.lower()))
+
+
+def minimize_choices(candidate_lists):
+    """Pick one candidate per list so the union of the picks stays small.
+
+    Lists with a single candidate pin it; the rest take an already-pinned
+    candidate when they can, otherwise the one covering the most remaining
+    lists. Ties go to the earliest candidate in the list.
+    """
+    chosen = [names[-1] if names else "" for names in candidate_lists]
+    required = {names[0] for names in candidate_lists if len(names) == 1}
+    pending = [i for i, names in enumerate(candidate_lists) if len(names) > 1]
+    while pending:
+        rest = []
+        for i in pending:
+            for name in candidate_lists[i]:
+                if name in required:
+                    chosen[i] = name
+                    break
+            else:
+                rest.append(i)
+        if len(rest) == len(pending):
+            required.add(_best_cover([candidate_lists[i] for i in rest]))
+        pending = rest
+    return chosen, required
+
+
+def minimize_override_sources(rows):
+    """Credit each found row to a provider the lot already needs.
+
+    A resource present in several loaded files is otherwise credited to
+    whichever one loaded last, which lists a package the lot does not need.
+    """
+    targets = []
+    for row in rows:
+        if row.status != "found" or not row.candidates:
+            continue
+        # A resource the game itself ships needs no dependency at all, so a
+        # Maxis file always beats a plugin that happens to override it.
+        builtin = next((name for name in row.candidates if is_builtin_game_file(name)), None)
+        if builtin is None:
+            targets.append(row)
+        else:
+            row.source = builtin
+    chosen, required = minimize_choices([row.candidates for row in targets])
+    for row, name in zip(targets, chosen):
+        row.source = name
+    return required
+
+
+def catalog_candidate_titles(row):
+    if row.source:
+        wanted = row.source.lower()
+        for match in row.catalog_matches:
+            if catalog_match_file_name(match).lower() == wanted:
+                title = catalog_match_title(match)
+                if title:
+                    return [title]
+    titles = []
+    for match in row.catalog_matches:
+        title = catalog_match_title(match)
+        if title and title not in titles:
+            titles.append(title)
+    return titles
+
+
+def minimize_catalog_packages(rows):
+    """Order each row's matches so the suggested package list stays small."""
+    targets = [row for row in rows if row.catalog_matches]
+    chosen, required = minimize_choices([catalog_candidate_titles(row) for row in targets])
+    for row, title in zip(targets, chosen):
+        if title:
+            row.catalog_matches = sorted(
+                row.catalog_matches,
+                key=lambda match: catalog_match_title(match) != title,
+            )
+    return required
+
+
 def dependency_package_buckets(rows):
     buckets = {}
     for row in rows:
@@ -382,6 +479,29 @@ def package_bucket_display_text(bucket):
     if file_name and file_name != package:
         return "%s\n%s" % (package, file_name)
     return package
+
+
+def dependency_plain_text(files, rows, selected=None):
+    """Render the details panel as plain text for the clipboard."""
+    lines = []
+    if selected is not None and len(selected.candidates) > 1:
+        lines.append("# " + DepDlgProvidersHeading % row_display_label(selected))
+        for name in selected.candidates:
+            lines.append(DepDlgProviderListed % name if name == selected.source else name)
+        lines.append("")
+    if files:
+        lines.append("# " + DepDlgFilesHeading)
+        lines.extend(sorted(files, key=str.lower))
+        lines.append("")
+    buckets = dependency_package_buckets(rows)
+    if buckets:
+        lines.append("# " + DepDlgPublishPackagesHeading)
+        for bucket in sorted(buckets.values(), key=lambda b: b["title"].lower()):
+            text = package_bucket_display_text(bucket).replace("\n", " - ")
+            if bucket["url"]:
+                text = "%s - %s" % (text, bucket["url"])
+            lines.append(text)
+    return "\n".join(lines).strip()
 
 
 def _match_tgi_group(match, group_id):
@@ -447,6 +567,8 @@ def run_catalog_download(catalog_settings, cancel, progress_callback, done_callb
 
 
 CATALOG_POST_BATCH = 25
+
+CATALOG_COL_WIDTH = 300
 
 
 def run_catalog_lookups(generation, jobs, catalog_settings, callback):
@@ -514,8 +636,8 @@ class DependencyResourcePanel(wx.html.HtmlWindow):
     def __init__(self, parent):
         wx.html.HtmlWindow.__init__(self, parent, -1, style=wx.html.HW_SCROLLBAR_AUTO | wx.BORDER_THEME)
         self._files = []
-        self._files_seen = set()
         self._rows = []
+        self._selected = None
         self._catalog_requested = False
         self.bMissing = False
         base = self.GetFont()
@@ -530,16 +652,39 @@ class DependencyResourcePanel(wx.html.HtmlWindow):
         if href:
             webbrowser.open(href)
 
-    def Append(self, value):
-        name = os.path.split(value)[1]
-        key = name.lower()
-        if key in self._files_seen:
-            return
-        self._files_seen.add(key)
-        self._files.append(name)
+    def SetFiles(self, names):
+        seen = {}
+        for name in names:
+            if name:
+                seen.setdefault(name.lower(), name)
+        self._files = list(seen.values())
 
     def Missing(self, v):
         self.bMissing = True
+
+    def SetSelected(self, row):
+        if row is self._selected:
+            return
+        self._selected = row
+        self.Render()
+
+    def _providers_html(self, esc):
+        row = self._selected
+        if row is None or len(row.candidates) < 2:
+            return []
+        out = ['<p style="margin:0 0 4px 0"><b>%s</b></p>'
+               % esc(DepDlgProvidersHeading % row_display_label(row))]
+        out.append('<ul style="margin:0 0 8px 18px">')
+        for name in row.candidates:
+            if name == row.source:
+                out.append('<li><b>%s</b></li>' % esc(DepDlgProviderListed % name))
+            else:
+                out.append('<li>%s</li>' % esc(name))
+        out.append('</ul>')
+        return out
+
+    def PlainText(self):
+        return dependency_plain_text(self._files, self._rows, self._selected)
 
     def _package_item_html(self, bucket, esc):
         package = bucket["package"] or bucket["title"]
@@ -560,6 +705,7 @@ class DependencyResourcePanel(wx.html.HtmlWindow):
         packages = sorted(buckets.values(), key=lambda b: b["title"].lower())
         esc = html_std.escape
         out = ['<html><body style="margin:6px">']
+        out.extend(self._providers_html(esc))
         if self._files:
             out.append('<p style="margin:0 0 4px 0"><b>%s</b></p>' % esc(DepDlgFilesHeading))
             out.append('<ul style="margin:0 0 8px 18px">')
@@ -654,7 +800,7 @@ class DependenciesDlg(sc.SizedDialog):
         self.list = ULC.UltimateListCtrl(
             list_panel, -1,
             agwStyle=ULC.ULC_REPORT | ULC.ULC_HRULES | ULC.ULC_VRULES | ULC.ULC_SHOW_TOOLTIPS | ULC.ULC_SINGLE_SEL,
-            size=(960, 430),
+            size=(1080, 460),
         )
         self.COL_STATUS = 0
         self.COL_NAME = 1
@@ -663,11 +809,12 @@ class DependenciesDlg(sc.SizedDialog):
         for idx, (label, width) in enumerate((
             (DepDlgColStatus, 90),
             (DepDlgColDependency, 360),
-            (DepDlgColLocalFile, 220),
-            (DepDlgCatalogPackage, 240),
+            (DepDlgColLocalFile, 320),
+            # Empty until identification runs, so it starts collapsed.
+            (DepDlgCatalogPackage, 0),
         )):
             self.list.InsertColumn(idx, label, width=width)
-        self.list.SetMinSize((940, 360))
+        self.list.SetMinSize((1060, 400))
         self._status_images = wx.ImageList(16, 16, True)
         self._status_icon_indices = {
             "found": self._status_images.Add(icon_bitmap("circle-check", 16, "#006E00")),
@@ -683,30 +830,38 @@ class DependenciesDlg(sc.SizedDialog):
         details_sizer = wx.BoxSizer(wx.VERTICAL)
         self.lb = DependencyResourcePanel(details_panel)
         details_sizer.Add(self.lb, 1, wx.EXPAND)
+        self.copyButton = wx.Button(details_panel, wx.ID_COPY, DepDlgCopyDetails)
+        set_button_icon(self.copyButton, "copy")
+        details_sizer.Add(self.copyButton, 0, wx.ALIGN_RIGHT | wx.TOP, 4)
         details_panel.SetSizer(details_sizer)
+        self.Bind(wx.EVT_BUTTON, self.OnCopyDetails, id=wx.ID_COPY)
+        self.Bind(wx.EVT_MENU, self.OnCopyDetails, id=wx.ID_COPY)
+        self.SetAcceleratorTable(wx.AcceleratorTable([
+            (wx.ACCEL_CTRL, ord('C'), wx.ID_COPY),
+        ]))
 
-        self.splitter.SplitVertically(list_panel, details_panel, 980)
+        self.splitter.SplitVertically(list_panel, details_panel, 1100)
         self.splitter.SetMinimumPaneSize(320)
         try:
             self.splitter.SetSashGravity(0.75)
         except AttributeError:
             pass
-        self.splitter.SetMinSize((1280, 430))
+        self.splitter.SetMinSize((1440, 460))
         try:
             self.splitter.SetSizerProps(expand=True, proportion=1)
         except AttributeError:
             pass
 
         self.BuildRows()
+        self.RefreshSources()
         self.RenderRows()
+        self.lb.SetSelected(self.rows_by_id.get(self.selected_row_id))
         self.lb.Render(self.rows, self._catalog_requested)
 
         self.SetButtonSizer(dialog_button_sizer(self))
         self.Fit()
-        self.SetMinSize((1320, 640))
-
-    def AddFileName(self, fileName):
-        self.lb.Append(fileName)
+        screen = wx.GetClientDisplayRect()
+        self.SetMinSize((min(1480, screen.width), min(720, screen.height)))
 
     def AddRow(self, status, kind, name, key, source, referenced_by, parent_id=None,
                tgi=None, iid=None, catalog_category=None, catalog_status="not_applicable",
@@ -736,8 +891,12 @@ class DependenciesDlg(sc.SizedDialog):
         source = os.path.split(file_name)[1] if file_name else ""
         row = self.AddRow("found", kind, name, key, source, referenced_by,
                           parent_id=parent_id, tgi=tgi, catalog_lookup=catalog_lookup)
-        if file_name:
-            self.lb.Append(file_name)
+        if tgi is not None:
+            row.candidates = [os.path.split(path)[1]
+                              for path in self.virtualDAT.providerFiles(tgi)
+                              if not is_tool_asset_file(path)]
+        if source and source not in row.candidates:
+            row.candidates.append(source)
         return row
 
     def AddMissingRow(self, kind, name, key, referenced_by, parent_id=None,
@@ -753,10 +912,17 @@ class DependenciesDlg(sc.SizedDialog):
         return self.AddRow("ignored", kind, name, key, source, referenced_by,
                            parent_id=parent_id)
 
+    def RefreshSources(self):
+        minimize_override_sources(self.rows)
+        self.lb.SetFiles(row.source for row in self.rows if row.status == "found")
+
     def RowStatusText(self, row):
         return row_status_text(row)
 
     def RowSourceText(self, row):
+        extra = len(row.candidates) - 1
+        if extra > 0:
+            return DepDlgSourceAlternates % (row.source, extra)
         return row.source
 
     def RowCatalogText(self, row):
@@ -774,6 +940,8 @@ class DependenciesDlg(sc.SizedDialog):
             return bool(row.catalog_matches)
         if selected == "found":
             return row.status == "found"
+        if selected == "overridden":
+            return len(row.candidates) > 1
         if selected == "unmatched":
             return row.catalog_status == "checked" and not row.catalog_matches and row.status != "ignored"
         if selected == "ignored":
@@ -802,6 +970,7 @@ class DependenciesDlg(sc.SizedDialog):
             row_catalog_file(row),
             row_catalog_match_text(row),
         ]
+        haystack.extend(row.candidates)
         for match in row.catalog_matches:
             haystack.extend([
                 catalog_match_package(match),
@@ -919,7 +1088,28 @@ class DependenciesDlg(sc.SizedDialog):
         idx = event.GetIndex()
         if 0 <= idx < len(self._visible_row_ids):
             self.selected_row_id = self._visible_row_ids[idx]
+            self.lb.SetSelected(self.rows_by_id.get(self.selected_row_id))
         event.Skip()
+
+    def OnCopyDetails(self, event):
+        # Ctrl+C is a dialog-wide accelerator, so hand it back to the search
+        # field when that is where the caret sits.
+        focus = self.FindFocus()
+        if isinstance(focus, wx.TextCtrl) and focus.CanCopy():
+            focus.Copy()
+            return
+        try:
+            text = self.lb.SelectionToText().strip()
+        except AttributeError:
+            text = ""
+        text = text or self.lb.PlainText()
+        if not text or not wx.TheClipboard.Open():
+            return
+        try:
+            wx.TheClipboard.SetData(wx.TextDataObject(text))
+            wx.TheClipboard.Flush()
+        finally:
+            wx.TheClipboard.Close()
 
     def OnIdentifyPackages(self, event):
         catalog_db.promote_staged()
@@ -941,6 +1131,7 @@ class DependenciesDlg(sc.SizedDialog):
         event.Skip()
 
     def BeginIdentification(self):
+        self.list.SetColumnWidth(self.COL_PACKAGE, CATALOG_COL_WIDTH)
         self._catalog_requested = True
         self._catalog_generation += 1
         for row in self.rows:
@@ -1047,6 +1238,7 @@ class DependenciesDlg(sc.SizedDialog):
             return
         self._render_scheduled = False
         self.RenderRows()
+        self.lb.SetSelected(self.rows_by_id.get(self.selected_row_id))
         self.lb.Render(self.rows, self._catalog_requested)
 
     def StartCatalogLookups(self):
@@ -1080,12 +1272,14 @@ class DependenciesDlg(sc.SizedDialog):
         for result in results:
             if self.ApplyCatalogResult(result):
                 changed = True
-        if changed:
-            self.ScheduleRender()
         if not any(row.catalog_status == "pending" for row in self.rows):
+            minimize_catalog_packages(self.rows)
+            changed = True
             self.identifyButton.SetLabel(DepDlgIdentifyPackages)
             set_button_icon(self.identifyButton, "packages")
             self.identifyButton.Enable(True)
+        if changed:
+            self.ScheduleRender()
 
     def ApplyCatalogResult(self, result):
         if not self._alive or result.generation != self._catalog_generation:

@@ -1,13 +1,18 @@
 from sc4pimx.DependenciesDlg import (
     DependencyRow,
     dependency_package_buckets,
+    dependency_plain_text,
     filter_catalog_matches,
     found_catalog_status,
     identification_catalog_status,
     is_ignored_sound_iid,
     is_builtin_game_file,
     is_placeholder_ltext_key,
+    is_tool_asset_file,
     lookup_catalog,
+    minimize_catalog_packages,
+    minimize_choices,
+    minimize_override_sources,
     package_bucket_display_text,
     row_display_label,
 )
@@ -246,3 +251,119 @@ def test_catalog_status_accepts_a_local_database_without_a_base_url():
     assert found_catalog_status("plugin.dat", (1, 2, 3), True, "", catalog_local=False) == "disabled"
     # A built-in game file is still never looked up.
     assert found_catalog_status("simcity_1.dat", (1, 2, 3), True, "", catalog_local=True) == "built_in"
+
+
+def _found(row_id, source, candidates, matches=None):
+    return DependencyRow(
+        id=row_id,
+        status="found",
+        kind="Prop",
+        name="",
+        key="0x%08X" % row_id,
+        source=source,
+        referenced_by="Props",
+        candidates=list(candidates),
+        catalog_matches=list(matches or []),
+    )
+
+
+def test_override_is_credited_to_the_file_the_lot_already_needs():
+    jes = "BSC MEGA Props - JES Vol01 v2.dat"
+    misc = "BSC MEGA Props - MISC Vol02 v4.dat"
+    # The model only ships in JES Vol01; the props ship in both and currently
+    # get credited to MISC Vol02 purely because it loads later.
+    model = _found(1, jes, [jes])
+    prop_a = _found(2, misc, [jes, misc])
+    prop_b = _found(3, misc, [jes, misc])
+
+    required = minimize_override_sources([model, prop_a, prop_b])
+
+    assert prop_a.source == jes
+    assert prop_b.source == jes
+    assert required == {jes}
+
+
+def test_ambiguous_rows_settle_on_one_shared_file():
+    peg = "PEG-SUPER-TEXTURES.dat"
+    bsc = "BSC Textures Vol01.dat"
+    rows = [_found(1, bsc, [peg, bsc]), _found(2, bsc, [peg, bsc])]
+
+    required = minimize_override_sources(rows)
+
+    assert required == {peg}
+    assert [row.source for row in rows] == [peg, peg]
+
+
+def test_single_candidate_rows_keep_their_own_file():
+    rows = [_found(1, "a.dat", ["a.dat"]), _found(2, "b.dat", ["b.dat"])]
+
+    assert minimize_override_sources(rows) == {"a.dat", "b.dat"}
+    assert [row.source for row in rows] == ["a.dat", "b.dat"]
+
+
+def test_catalog_packages_prefer_the_local_file_then_the_shared_package():
+    pinned = _found(1, "vol01.dat", ["vol01.dat"], [
+        {"Package": "misc-vol02", "FileName": "vol02.dat"},
+        {"Package": "jes-vol01", "FileName": "vol01.dat"},
+    ])
+    ambiguous = _found(2, "shared.dat", ["shared.dat"], [
+        {"Package": "misc-vol02", "FileName": "vol02.dat"},
+        {"Package": "jes-vol01", "FileName": "other.dat"},
+    ])
+
+    minimize_catalog_packages([pinned, ambiguous])
+
+    assert pinned.catalog_matches[0]["Package"] == "jes-vol01"
+    assert ambiguous.catalog_matches[0]["Package"] == "jes-vol01"
+
+
+def test_minimize_choices_leaves_rows_without_candidates_alone():
+    chosen, required = minimize_choices([[], ["only.dat"]])
+
+    assert chosen == ["", "only.dat"]
+    assert required == {"only.dat"}
+
+
+def test_details_panel_copies_as_plain_text():
+    row = _found(1, "vol01.dat", ["vol01.dat", "vol02.dat"], [
+        {"Package": "jes-vol01", "FileName": "vol01.dat", "Websites": "https://example.org/x"},
+    ])
+
+    text = dependency_plain_text(["b.dat", "A.dat"], [row], selected=row)
+
+    assert text.splitlines() == [
+        "# Loaded files providing Props: 0x00000001",
+        "vol01.dat (listed as the dependency)",
+        "vol02.dat",
+        "",
+        "# Files contributing to this lot",
+        "A.dat",
+        "b.dat",
+        "",
+        "# Packages to list",
+        "jes-vol01 - vol01.dat - https://example.org/x",
+    ]
+
+
+def test_plain_text_is_empty_without_content():
+    assert dependency_plain_text([], []) == ""
+
+
+def test_bundled_cohorts_file_is_never_a_dependency():
+    assert is_tool_asset_file(r"C:\Program Files\SC4PIM\assets\dbpf\cohorts.dat")
+    assert is_tool_asset_file("Cohorts.dat")
+    assert not is_tool_asset_file("simcity_1.dat")
+    assert not is_tool_asset_file("BSC MEGA Props - JES Vol01 v2.dat")
+
+
+def test_maxis_files_beat_a_plugin_that_overrides_them():
+    plugin = "Some Plugin.dat"
+    # The plugin is pinned by a row it alone provides, so without an explicit
+    # rule the shared texture would follow it instead of staying vanilla.
+    pinned = _found(1, plugin, [plugin])
+    overridden = _found(2, plugin, ["simcity_1.dat", plugin])
+
+    required = minimize_override_sources([pinned, overridden])
+
+    assert overridden.source == "simcity_1.dat"
+    assert required == {plugin}

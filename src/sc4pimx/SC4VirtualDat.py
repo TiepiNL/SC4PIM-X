@@ -57,6 +57,8 @@ class VirtualDat(object):
         self.s3dEntries = {}
         self.allTextures = []
         self.allEntries = []
+        # tgi -> file names overridden by a later-loaded file, in load order.
+        self.shadowed = {}
         self.cohorts = []
         self.TGIIndex = {}
         self.tree = visual_tree
@@ -405,6 +407,7 @@ class VirtualDat(object):
         # that path isn't part of the bulk scan.
         index = self.TGIIndex
         all_entries = self.allEntries
+        shadowed = self.shadowed
         append = all_entries.append
         n = len(all_entries)
         before = n
@@ -421,6 +424,9 @@ class VirtualDat(object):
                     append(entry)
                     n += 1
                 else:
+                    old = all_entries[existing]
+                    if old.fileName != entry.fileName:
+                        shadowed.setdefault(tgi, []).append(old.fileName)
                     all_entries[existing] = entry
                     replaced += 1
         else:
@@ -435,6 +441,9 @@ class VirtualDat(object):
                     append(entry)
                     n += 1
                 else:
+                    old = all_entries[existing]
+                    if old.fileName != entry.fileName:
+                        shadowed.setdefault(tgi, []).append(old.fileName)
                     all_entries[existing] = entry
                     replaced += 1
                 tree.UpdateEntry(entry, self, bStandard, dlg)
@@ -456,6 +465,21 @@ class VirtualDat(object):
             return None
 
         return None
+
+    def providerFiles(self, tgi):
+        """File names supplying *tgi*, in load order, winning file last."""
+        tgi = tuple(tgi)
+        entry = self.getEntry(*tgi)
+        if entry is None:
+            return []
+        files = []
+        for name in self.shadowed.get(tgi, ()):
+            if name not in files:
+                files.append(name)
+        if entry.fileName in files:
+            files.remove(entry.fileName)
+        files.append(entry.fileName)
+        return files
 
     def Finalize(self, dlg):
         """Compatibility wrapper for callers that require synchronous finalization."""
