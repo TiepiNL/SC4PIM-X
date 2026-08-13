@@ -1370,7 +1370,7 @@ class DependenciesDlg(sc.SizedDialog):
         parent_row = self.AddFoundRow(kind, desc.name, self.EntryTGIText(desc.exemplar.entry),
                                       desc.fileName, referenced_by, tgi=desc_tgi)
         pid = parent_row.id
-        model_catalog_lookup = kind != "Prop"
+        model_catalog_lookup = True
 
         for prop_id in (662775840, 662775841):
             rtk = desc.exemplar.GetProp(prop_id)
