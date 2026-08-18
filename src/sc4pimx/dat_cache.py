@@ -22,15 +22,20 @@ Cache blobs use a tight little-endian binary format rather than ``pickle``:
     4B  order (uint32)
     4B  lenContent (int32 -- negative is sentinel from compressed-before-decode)
     4B  body length (uint32, 0 if body not cached)
+    1B  compressed flag (0/1 -- true on-disk QFS state, see note below)
     M   body bytes (DECOMPRESSED -- see note below)
 
 Note on compression: SC4Entry.read_file() decodes QFS-compressed bodies into
 ``content`` and leaves ``rawContent`` holding the raw on-disk bytes (compressed
 or not). QFS decoding is pure Python, so re-decoding on every cache hit
-would dominate warm-start time. The cache therefore stores the *decompressed*
-bytes and restores entries with ``compressed=False``; the (rare) re-save path
-will write uncompressed entries unless explicitly recompressed via
-``WriteADat(..., bRecompress=True)``.
+would dominate warm-start time, so the cache always stores the *decompressed*
+body as ``content``. The true ``compressed`` flag is cached alongside it,
+though: entries that were compressed on disk are restored with
+``rawContent=None`` (their cached body isn't the real on-disk bytes), so an
+untouched entry that ends up back in a whole-file rewrite is transparently
+re-read from disk -- see the ``rawContent is None`` guard in
+``SC4Entry.read_file()`` and ``WriteADat()`` -- instead of silently being
+written out decompressed.
 
 Bump :data:`CACHE_VERSION` on any layout change that would make existing
 blobs unsafe to load -- the table query filters by it, so stale rows are
@@ -49,12 +54,12 @@ logger = logging.getLogger(__name__)
 
 # Bump on any change to the binary format below or to SC4Entry attributes
 # that consumers rely on.
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 _MAGIC = b'DBPC'
 _HEADER_FMT = struct.Struct('<4sBIH')        # magic, version, dateLastAccess, fn_len
 _COUNT_FMT = struct.Struct('<I')             # entry count (after fileName)
-_ENTRY_FMT = struct.Struct('<20sIiI')        # buffer, order, lenContent, body_len
+_ENTRY_FMT = struct.Struct('<20sIiIB')       # buffer, order, lenContent, body_len, compressed
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS dat_cache (
@@ -262,7 +267,8 @@ def serialize_entries(entries) -> Optional[bytes]:
             if len_content < -0x80000000 or len_content > 0x7FFFFFFF:
                 len_content = len(body_bytes)
             parts.append(_ENTRY_FMT.pack(e.buffer, e.order, len_content,
-                                         len(body_bytes)))
+                                         len(body_bytes),
+                                         1 if getattr(e, 'compressed', False) else 0))
             if body_bytes:
                 parts.append(body_bytes)
         return b''.join(parts)
@@ -277,7 +283,8 @@ def deserialize_entries(blob: bytes) -> list:
     Constructs ``SC4Entry`` objects via ``__new__`` (bypassing ``__init__``)
     and populates their attributes directly. The returned list is shaped
     exactly as a fresh ``DatFile.entries`` would be after ``ReadEntries``,
-    except cached bodies are pre-decompressed (``compressed=False``).
+    except cached bodies are pre-decompressed regardless of the entry's true
+    ``compressed`` state (that state is restored from the cache verbatim).
     """
     # Local import: dat_cache is imported by SC4VirtualDat at module load,
     # but SC4DatTools doesn't import dat_cache. Importing SC4Entry at module
@@ -297,7 +304,7 @@ def deserialize_entries(blob: bytes) -> list:
     entry_size = _ENTRY_FMT.size
     new_entry = SC4Entry.__new__
     for i in range(count):
-        buffer, order, len_content, body_len = _ENTRY_FMT.unpack_from(mv, pos)
+        buffer, order, len_content, body_len, compressed = _ENTRY_FMT.unpack_from(mv, pos)
         pos += entry_size
         if body_len:
             body = bytes(mv[pos:pos + body_len])
@@ -317,13 +324,16 @@ def deserialize_entries(blob: bytes) -> list:
         e.initialFileLocation = file_location
         e.filesize = file_size
         e.lenContent = len_content
-        # Bodies were stored decompressed; mark accordingly so consumers and
-        # read_file() see a coherent state. read_file() returns early when
-        # rawContent is not None, so cached entries skip disk re-reads.
-        e.compressed = False
         e.dirty = False
-        e.rawContent = body
+        e.compressed = bool(compressed)
         e.content = body
+        # Cached bodies are always decompressed. If the entry's true on-disk
+        # state is compressed, `body` isn't the real rawContent, so leave it
+        # unset -- read_file()'s `rawContent is None` guard (and WriteADat's
+        # matching guard) will transparently re-read the true compressed
+        # bytes from disk if this untouched entry ever ends up back in a
+        # write. Only uncompressed entries can serve their cached body as-is.
+        e.rawContent = body if not e.compressed else None
         e.dateCreated = date_last_access
         e.dateUpdated = date_last_access
         entries[i] = e
