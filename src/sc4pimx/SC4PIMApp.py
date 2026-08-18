@@ -2785,9 +2785,9 @@ class NoteBookPanel(wx.Panel):
         set_button_icon(self.bSave, "device-floppy")
         self.bSave.Enable(False)
         self.Bind(wx.EVT_BUTTON, self.OnSaveTab, self.bSave)
-        self.cbKeepCompressed = wx.CheckBox(self, -1, propertyPageKeepCompressed)
-        self.cbKeepCompressed.SetValue(bool(self.exemplar.entry.compressed))
-        self.cbKeepCompressed.SetToolTip(propertyPageKeepCompressedTooltip)
+        self.cbCompressOnSave = wx.CheckBox(self, -1, propertyPageCompressOnSave)
+        self.cbCompressOnSave.SetValue(bool(self.exemplar.entry.compressed))
+        self.cbCompressOnSave.SetToolTip(propertyPageCompressOnSaveTooltip)
         self.listProperties = PropListCtrl(self)
         self.listProperties.InsertColumn(0, propertyPageColumnName)
         self.listProperties.InsertColumn(1, propertyPageColumnNameValue)
@@ -2833,7 +2833,7 @@ class NoteBookPanel(wx.Panel):
         horiz = wx.BoxSizer(wx.HORIZONTAL)
         horiz.Add(self.bSave, 0, wx.ALIGN_CENTRE | wx.ALL, 5)
         horiz.Add(self.bClose, 0, wx.ALIGN_CENTRE | wx.ALL, 5)
-        horiz.Add(self.cbKeepCompressed, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        horiz.Add(self.cbCompressOnSave, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
         box.Add(horiz, 0, wx.ALIGN_CENTRE | wx.ALL, 5)
         self.SetSizer(box)
         self.listProperties.Bind(wx.EVT_RIGHT_DOWN, self.OnRightClick)
@@ -3424,7 +3424,7 @@ class NoteBookPanel(wx.Panel):
             dlg.ShowModal()
             dlg.Destroy()
             return
-        self.exemplar.entry.compressOnSave = self.cbKeepCompressed.GetValue()
+        self.exemplar.entry.compressOnSave = self.cbCompressOnSave.GetValue()
         self.exemplar.Maj()
         if not self.InternalSave(self.exemplar.entry.fileName):
             return
@@ -3432,7 +3432,7 @@ class NoteBookPanel(wx.Panel):
         self.bSave.Enable(False)
         # Reflect what actually happened -- e.g. content too small to shrink
         # via QFS stays uncompressed even if the box was ticked.
-        self.cbKeepCompressed.SetValue(bool(self.exemplar.entry.compressed))
+        self.cbCompressOnSave.SetValue(bool(self.exemplar.entry.compressed))
         IID = self.exemplar.entry.tgi[2]
         texEntry = self.virtual_dat.getEntry(2238569388, 1782082854, IID)
         if texEntry is not None:
