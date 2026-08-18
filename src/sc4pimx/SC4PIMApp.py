@@ -500,14 +500,14 @@ def _finish_building_text_resources(virtual_dat, source_exemplar, building_entry
     return entries
 
 
-def _write_entries_atomic(file_name, entries):
+def _write_entries_atomic(file_name, entries, bRecompress=True):
     directory = os.path.dirname(file_name) or os.curdir
     fd, temporary = tempfile.mkstemp(prefix='.sc4pimx-convert-', suffix='.tmp', dir=directory)
     os.close(fd)
     try:
         for entry in entries:
             entry.fileName = file_name
-        WriteADat(temporary, entries, None, True)
+        WriteADat(temporary, entries, None, bRecompress)
         os.replace(temporary, file_name)
     except Exception:
         try:
@@ -573,7 +573,11 @@ def _execute_exemplar_submenu_updates(virtual_dat, packages, submenu_id, create_
                 backup = _next_backup_path(file_name)
                 shutil.copy2(file_name, backup)
                 backups.append(backup)
-            _write_entries_atomic(file_name, entries)
+            # bRecompress=False: the touched building exemplar(s) already
+            # decided their own compression state in Maj() (preserve pre-edit
+            # state by default); untouched siblings pulled in by the whole-file
+            # rewrite must never be swept into recompression here.
+            _write_entries_atomic(file_name, entries, bRecompress=False)
             updated.extend(targets)
         except Exception as exc:
             logger.exception('Could not update submenu membership in %s', file_name)
