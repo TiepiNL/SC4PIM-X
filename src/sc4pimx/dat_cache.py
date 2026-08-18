@@ -325,6 +325,7 @@ def deserialize_entries(blob: bytes) -> list:
         e.filesize = file_size
         e.lenContent = len_content
         e.dirty = False
+        e.compressOnSave = None
         e.compressed = bool(compressed)
         e.content = body
         # Cached bodies are always decompressed. If the entry's true on-disk

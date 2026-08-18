@@ -742,6 +742,10 @@ class SC4Entry():
             t, g, i, self.fileLocation, self.filesize = struct.unpack('<IIIII', buffer)
             self.compressed = False
             self.dirty = False
+            # Tri-state override consulted by Maj(): None means "keep whatever
+            # self.compressed was before this edit" (the default), True/False
+            # force QFS-recompression on/off regardless of the prior state.
+            self.compressOnSave = None
             self.fileName = fileName
             self.buffer = buffer
             self.order = idx
@@ -793,7 +797,11 @@ class SC4Entry():
         return True
 
     def Maj(self):
-        self.compressed = False
+        # Default (compressOnSave is None): keep whatever this entry's
+        # compression state was before this edit, so a genuinely-modified
+        # exemplar that was compressed on disk stays compressed after Save,
+        # matching Maxis' own editor behavior rather than always decompressing.
+        wantCompressed = self.compressOnSave if self.compressOnSave is not None else self.compressed
         self.dirty = True
         content = self.content
         if isinstance(content, str):
@@ -802,6 +810,9 @@ class SC4Entry():
         self.lenContent = len(content)
         self.filesize = self.lenContent
         self.buffer = struct.pack('<IIIII', self.tgi[0], self.tgi[1], self.tgi[2], 0, self.filesize)
+        self.compressed = False
+        if wantCompressed:
+            RecompressEntry(self)
 
     def IsItThisTGI(self, tgi):
         return tgi[0] == self.TGI['t'] and tgi[1] == self.TGI['g'] and tgi[2] == self.TGI['i']
@@ -916,6 +927,27 @@ class DatFile():
         return
 
 
+def RecompressEntry(entry):
+    """QFS-encode entry.rawContent in place if that's smaller, marking it compressed.
+
+    entry.rawContent must already hold the decompressed bytes to encode. No-op
+    (returns False) if the entry is too small to bother, or if compressing
+    doesn't actually shrink it -- matches the threshold WriteADat has always
+    used for its own opportunistic recompression.
+    """
+    if entry.rawContent is None or len(entry.rawContent) <= 600:
+        return False
+    compression = QFS.encode(entry.rawContent)
+    if not compression or len(compression) >= len(entry.rawContent):
+        return False
+    compression = struct.pack('<i', len(compression)) + compression
+    entry.filesize = len(compression)
+    entry.rawContent = compression
+    entry.buffer = entry.buffer[:16] + struct.pack('I', entry.filesize) + entry.buffer[16 + 4:]
+    entry.compressed = True
+    return True
+
+
 def GenerateDirectory(allEntries, fileName):
     nbrCompressed = 0
     for entry in allEntries:
@@ -962,14 +994,7 @@ def WriteADat(fileName, allEntries, dlg, bRecompress):
                     sc4In = open(entry.fileName, 'rb')
                     entry.read_file(sc4In)
                     sc4In.close()
-            if bRecompress and entryDirty and not entry.compressed and len(entry.rawContent) > 600:
-                compression = QFS.encode(entry.rawContent)
-                if compression and len(compression) < len(entry.rawContent):
-                    compression = struct.pack('<i', len(compression)) + compression
-                    entry.filesize = len(compression)
-                    entry.rawContent = compression
-                    entry.buffer = entry.buffer[:16] + struct.pack('I', entry.filesize) + entry.buffer[16 + 4:]
-                    entry.compressed = True
+                RecompressEntry(entry)
             withoutDir.append(entry)
 
     allEntries = withoutDir
