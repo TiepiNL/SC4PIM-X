@@ -741,6 +741,7 @@ class SC4Entry():
         try:
             t, g, i, self.fileLocation, self.filesize = struct.unpack('<IIIII', buffer)
             self.compressed = False
+            self.dirty = False
             self.fileName = fileName
             self.buffer = buffer
             self.order = idx
@@ -793,6 +794,7 @@ class SC4Entry():
 
     def Maj(self):
         self.compressed = False
+        self.dirty = True
         content = self.content
         if isinstance(content, str):
             content = content.encode("latin-1", errors="replace")
@@ -954,12 +956,13 @@ def WriteADat(fileName, allEntries, dlg, bRecompress):
         if entry.tgi == (3899334383, 3899334383, 678108931):
             pass
         else:
-            if bRecompress and not entry.compressed:
+            entryDirty = getattr(entry, 'dirty', False)
+            if bRecompress and entryDirty and not entry.compressed:
                 if entry.rawContent is None:
                     sc4In = open(entry.fileName, 'rb')
                     entry.read_file(sc4In)
                     sc4In.close()
-            if bRecompress and not entry.compressed and len(entry.rawContent) > 600:
+            if bRecompress and entryDirty and not entry.compressed and len(entry.rawContent) > 600:
                 compression = QFS.encode(entry.rawContent)
                 if compression and len(compression) < len(entry.rawContent):
                     compression = struct.pack('<i', len(compression)) + compression

@@ -321,6 +321,7 @@ def deserialize_entries(blob: bytes) -> list:
         # read_file() see a coherent state. read_file() returns early when
         # rawContent is not None, so cached entries skip disk re-reads.
         e.compressed = False
+        e.dirty = False
         e.rawContent = body
         e.content = body
         e.dateCreated = date_last_access
