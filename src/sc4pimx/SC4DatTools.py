@@ -812,7 +812,10 @@ class SC4Entry():
         self.buffer = struct.pack('<IIIII', self.tgi[0], self.tgi[1], self.tgi[2], 0, self.filesize)
         self.compressed = False
         if wantCompressed:
-            RecompressEntry(self)
+            # minSize=0: both branches above are deliberate choices -- an
+            # explicit compressOnSave tick, or preserving the state the entry
+            # already had -- so a size threshold must not silently veto them.
+            RecompressEntry(self, minSize=0)
 
     def IsItThisTGI(self, tgi):
         return tgi[0] == self.TGI['t'] and tgi[1] == self.TGI['g'] and tgi[2] == self.TGI['i']
@@ -927,15 +930,17 @@ class DatFile():
         return
 
 
-def RecompressEntry(entry):
+def RecompressEntry(entry, minSize=600):
     """QFS-encode entry.rawContent in place if that's smaller, marking it compressed.
 
     entry.rawContent must already hold the decompressed bytes to encode. No-op
-    (returns False) if the entry is too small to bother, or if compressing
-    doesn't actually shrink it -- matches the threshold WriteADat has always
-    used for its own opportunistic recompression.
+    (returns False) if compressing doesn't actually shrink the entry, or if it
+    is minSize bytes or smaller. The default skips entries too small to be
+    worth compressing on the opportunistic whole-package path; callers acting
+    on an explicit request pass minSize=0, since there the user has already
+    decided the entry is worth compressing.
     """
-    if entry.rawContent is None or len(entry.rawContent) <= 600:
+    if entry.rawContent is None or len(entry.rawContent) <= minSize:
         return False
     compression = QFS.encode(entry.rawContent)
     if not compression or len(compression) >= len(entry.rawContent):
