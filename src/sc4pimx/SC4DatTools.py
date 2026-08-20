@@ -988,12 +988,18 @@ def WriteADat(fileName, allEntries, dlg, bRecompress):
         if entry.tgi == (3899334383, 3899334383, 678108931):
             pass
         else:
+            # Load every body up front, whatever else we do with the entry.
+            # The index loop below overwrites initialFileLocation with the
+            # entry's new output offset, and fileName is opened for writing
+            # further down -- often the very file we read from. Loading any
+            # later seeks to the wrong offset, or into a truncated file, and
+            # silently writes garbage of the right length.
+            if entry.rawContent is None:
+                sc4In = open(entry.fileName, 'rb')
+                entry.read_file(sc4In)
+                sc4In.close()
             entryDirty = getattr(entry, 'dirty', False)
             if bRecompress and entryDirty and not entry.compressed:
-                if entry.rawContent is None:
-                    sc4In = open(entry.fileName, 'rb')
-                    entry.read_file(sc4In)
-                    sc4In.close()
                 RecompressEntry(entry)
             withoutDir.append(entry)
 
@@ -1053,10 +1059,6 @@ def WriteADat(fileName, allEntries, dlg, bRecompress):
         if dlg:
             dlg.g2.SetValue(i)
         wx.Yield()
-        if entry.rawContent is None:
-            sc4In = open(entry.fileName, 'rb')
-            entry.read_file(sc4In)
-            sc4In.close()
         raw = entry.rawContent
         if isinstance(raw, str):
             raw = raw.encode("latin-1", errors="replace")
