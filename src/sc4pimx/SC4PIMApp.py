@@ -2726,11 +2726,12 @@ class PropListCtrl(ULC.UltimateListCtrl):
 class EditDialog(sc.SizedDialog):
 
     def __init__(self, parent, title, txt):
-        sc.SizedDialog.__init__(self, parent, -1, title)
+        sc.SizedDialog.__init__(self, parent, -1, title, style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         pane = self.GetContentsPane()
         pane.SetSizerType('vertical')
         wx.StaticText(pane, 1, editUnicodeWarning)
         self.editor = wx.TextCtrl(pane, -1, txt, style=wx.TE_MULTILINE, size=Size(400, 100))
+        self.editor.SetSizerProps(expand=True, proportion=1)
         self.SetButtonSizer(dialog_button_sizer(self))
         self.Fit()
         self.SetMinSize(self.GetSize())
