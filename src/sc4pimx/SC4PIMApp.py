@@ -984,15 +984,16 @@ def change_submenu_icon_flow(window, virtual_dat, menu_entry):
     icon_entry = menu_icon_entry(virtual_dat, menu_entry)
     if icon_entry is not None:
         target_file = icon_entry.fileName
-        icon_tgi = tuple(icon_entry.tgi)
+        old_icon_tgi = tuple(icon_entry.tgi)
     elif menu_entry.tgi is not None and menu_entry.file_name:
         # The button exists but has no icon resource yet: add one next to it.
         target_file = menu_entry.file_name
-        icon_tgi = (PNG_ICON_TYPE, menu_entry.tgi[1],
-                    menu_entry.icon_id if menu_entry.icon_id is not None else menu_entry.value)
+        old_icon_tgi = None
     else:
         wx.MessageBox(LEXSubmenuIconNoTarget, LEXSubmenuIconDialogTitle, wx.OK | wx.ICON_INFORMATION, window)
         return False
+    icon_tgi = (PNG_ICON_TYPE, _PIM_RESOURCE_GROUP,
+                menu_entry.icon_id if menu_entry.icon_id is not None else menu_entry.value)
 
     current = None
     png = menu_icon_png(virtual_dat, menu_entry)
@@ -1023,7 +1024,7 @@ def change_submenu_icon_flow(window, virtual_dat, menu_entry):
     try:
         for entry in entries:
             entry.read_file(None, True, False)
-        rewritten = [new_entry if tuple(entry.tgi) == icon_tgi else entry for entry in entries]
+        rewritten = [new_entry if tuple(entry.tgi) == old_icon_tgi else entry for entry in entries]
         if all(entry is not new_entry for entry in rewritten):
             rewritten.append(new_entry)
         _write_entries_atomic(target_file, rewritten)
