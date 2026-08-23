@@ -358,10 +358,16 @@ class Prop():
         try:
             ret = struct.pack('I', self.id)
             ret += struct.pack('H', self.typeValue)
-            if self.exemplar.entry.virtual_dat.properties[self.id].Count == 1:
+            declared_count = self.exemplar.entry.virtual_dat.properties[self.id].Count
+            if declared_count == 1 and len(self.values) == 1:
                 self.sizeOfCounter = 0
             else:
                 self.sizeOfCounter = 128
+                if declared_count == 1 and len(self.values) > 1:
+                    logger.warning(
+                        'Property 0x%08X is declared scalar but has %d values; writing array encoding',
+                        self.id, len(self.values),
+                    )
             if self.typeValue == 3072:
                 self.sizeOfCounter = 128
             ret += struct.pack('H', self.sizeOfCounter)

@@ -51,8 +51,8 @@ def test_submenu_button_entry_uses_mayor_mode_button_group(tmp_path):
     assert package.is_file()
 
 
-def test_populated_submenu_patch_cohort_is_normalized_to_binary():
-    targets = _property(0x0062E78A, "Exemplar Patch Targets", 2)
+def test_populated_submenu_patch_cohort_hardens_stale_scalar_metadata(caplog):
+    targets = _property(0x0062E78A, "Exemplar Patch Targets", 1)
     submenu = _property(0xAA1DD399, "Building Submenus", 1)
     virtual_dat = SimpleNamespace(properties={targets.ID: targets, submenu.ID: submenu})
 
@@ -68,8 +68,10 @@ def test_populated_submenu_patch_cohort_is_normalized_to_binary():
     )
 
     assert entry.rawContent.startswith(b"CQZB1###")
+    assert b"\x8a\xe7\x62\x00\x00\x03\x80\x00\x00\x02\x00\x00\x00" in entry.rawContent
     assert entry.exemplar.GetProp(targets.ID) == [0x8A3858D8, 0x03280000]
     assert entry.exemplar.GetProp(submenu.ID) == [0xAC706063]
+    assert "declared scalar but has 2 values" in caplog.text
 
 
 def test_exemplar_patch_entry_uses_resource_loading_hooks_group(tmp_path):
