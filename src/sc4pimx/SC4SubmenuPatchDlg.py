@@ -95,6 +95,10 @@ class SubmenuAssignmentDialog(wx.Dialog):
         self.searchButton = wx.Button(self, -1, LEXSubmenuPatchSearch)
         set_button_icon(self.searchButton, "zoom-in")
         search_row.Add(self.searchButton, 0)
+        self.selectAllButton = wx.Button(self, -1, LEXSubmenuPatchSelectAll)
+        search_row.Add(self.selectAllButton, 0, wx.LEFT, 6)
+        self.clearAllButton = wx.Button(self, -1, LEXSubmenuPatchClearAll)
+        search_row.Add(self.clearAllButton, 0, wx.LEFT, 6)
 
         self.list = ULC.UltimateListCtrl(
             self, -1,
@@ -148,6 +152,8 @@ class SubmenuAssignmentDialog(wx.Dialog):
 
         self.searchButton.Bind(wx.EVT_BUTTON, self._on_search)
         self.searchCtrl.Bind(wx.EVT_TEXT_ENTER, self._on_search)
+        self.selectAllButton.Bind(wx.EVT_BUTTON, lambda e: self._set_all_checked(True))
+        self.clearAllButton.Bind(wx.EVT_BUTTON, lambda e: self._set_all_checked(False))
         self.parentCombo.Bind(wx.EVT_COMBOBOX, self._on_parent_changed)
         self.parentCombo.Bind(wx.EVT_TEXT, self._on_parent_changed)
         self.list.Bind(ULC.EVT_LIST_ITEM_CHECKED, self._on_item_checked)
@@ -235,6 +241,13 @@ class SubmenuAssignmentDialog(wx.Dialog):
                 self.list._mainWin.CheckItem(item, target.tgi in self._checked)
         finally:
             self.list.Thaw()
+
+    def _set_all_checked(self, checked):
+        if checked:
+            self._checked.update(t.tgi for t in self._order)
+        else:
+            self._checked.clear()
+        self._refresh()
 
     def _on_item_checked(self, event):
         idx = event.GetIndex()

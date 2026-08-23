@@ -35,6 +35,26 @@ def data_file_path(name: str) -> Path:
     return asset_path(name)
 
 
+def is_user_override(name: str) -> bool:
+    """True if a user-supplied override of ``name`` is active."""
+    return user_data_path(name).exists()
+
+
+def override_label(name: str) -> str:
+    """Display name of a user override, from its root ``DisplayName`` attribute.
+
+    Empty string when there is no override or the attribute/file is unusable.
+    """
+    path = user_data_path(name)
+    if not path.exists():
+        return ""
+    try:
+        import xml.etree.ElementTree as ET
+        return (ET.parse(path).getroot().get("DisplayName") or "").strip()
+    except Exception:
+        return ""
+
+
 def background_path(name: str) -> Path:
     """Locate an optional Lot Editor transit-overlay image.
 

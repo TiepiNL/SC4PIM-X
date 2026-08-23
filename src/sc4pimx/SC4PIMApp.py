@@ -41,7 +41,7 @@ from .ATCViewer import *
 from .ConvertLotBuildingDlg import MODE_OVERRIDE, ConvertLotBuildingDialog
 from .DependenciesDlg import *
 from .logsetup import configure_logging
-from .paths import asset_path, ensure_user_data_dir, image_db_dir, image_db_path
+from .paths import asset_path, ensure_user_data_dir, image_db_dir, image_db_path, is_user_override, override_label, user_data_path
 from .S3DViewer import S3DViewer
 from .SC4Data import conversion_target_kind, list_convertible_categories, make_ltext_entry
 from .SC4LotPreview import *
@@ -5683,7 +5683,11 @@ class MainFrame(wx.Frame):
     def __init__(self):
         self._mw_settings = config.load_main_window()
         size = Size(int(self._mw_settings['Width']), int(self._mw_settings['Height']))
-        wx.Frame.__init__(self, None, title='%s %s' % (appTitle, get_version()), size=size)
+        override = override_label('new_properties.xml') or 'user override' if is_user_override('new_properties.xml') else ''
+        wx.Frame.__init__(self, None, title='%s %s%s' % (
+            appTitle, get_version(),
+            ' [new_properties.xml: %s]' % override if override else '',
+        ), size=size)
         pos_x = int(self._mw_settings['X'])
         pos_y = int(self._mw_settings['Y'])
         if pos_x >= 0 and pos_y >= 0:
@@ -7057,6 +7061,12 @@ def _generate_atc_thumbnail(virtual_dat, atc, dest_path):
 def main() -> None:
     configure_logging()
     logger.info('SC4PIM-X %s starting', get_version())
+    if is_user_override('new_properties.xml'):
+        np_path = user_data_path('new_properties.xml')
+        logger.info('new_properties.xml: custom override loaded from %s (DisplayName: %s)',
+                    np_path, override_label('new_properties.xml') or '<not set>')
+    else:
+        logger.info('new_properties.xml: bundled default')
     _enable_high_dpi()
     _enable_faulthandler()
     image_db = image_db_dir()
