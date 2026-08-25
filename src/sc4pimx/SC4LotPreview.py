@@ -493,6 +493,7 @@ class LEInspectorPanel(wx.Panel):
         sizer = wx.BoxSizer(wx.VERTICAL)
         self.text = wx.TextCtrl(self, -1, LEXInspectorPrompt, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.BORDER_NONE)
         self.text.SetBackgroundColour(surface)
+        self.text.SetMinSize((-1, 200))
         box = wx.StaticBox(self, -1, LEXInspectorEditPlacement)
         fields = wx.StaticBoxSizer(box, wx.VERTICAL)
         grid = wx.FlexGridSizer(3, 2, 4, 6)
@@ -533,10 +534,10 @@ class LEInspectorPanel(wx.Panel):
         self.familySizer = wx.WrapSizer(wx.HORIZONTAL)
         self.familyGrid.SetSizer(self.familySizer)
         family_fields.Add(self.familyGrid, 1, wx.EXPAND | wx.ALL, 4)
-        sizer.Add(self.text, 1, wx.EXPAND | wx.ALL, 6)
+        sizer.Add(self.text, 0, wx.EXPAND | wx.ALL, 6)
         sizer.Add(fields, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
         sizer.Add(self.transitPanel, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
-        sizer.Add(family_fields, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
+        sizer.Add(family_fields, 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
         self.SetSizer(sizer)
         self._outer = sizer
         self._fields = fields
