@@ -9,6 +9,7 @@ from PIL import Image
 
 from .SC4CityContext import ROAD_FLAG_EDGES, road_edges_from_flags
 from .SC4Data import CreateAPropFromString
+from .SC4DataFunctions import LOT_CONFIG_PROPERTY_FIRST, LOT_CONFIG_PROPERTY_LAST
 from .SC4DatTools import CreateAProp, Prop, SC4Exemplar
 from .SC4LETools import BitmapFromPIL
 from .SC4StructuredPropertyEditors import _option_items, edit_structured_property
@@ -27,7 +28,7 @@ MAX_SLOPE_ALLOWED_PROP = 0xE99B068C
 MIN_SLOPE_ALLOWED_PROP = 0x699B08A4
 GROWTH_STAGE_PROP = 0x27812837
 
-_LOT_OBJECT_RANGE = range(2297284864, 2297286144)
+_LOT_OBJECT_RANGE = range(LOT_CONFIG_PROPERTY_FIRST, LOT_CONFIG_PROPERTY_LAST + 1)
 
 # Confirmed against the base game's SimCity_1.dat/SimCity_2.dat (Ghidra's
 # 0x891B0E1A group turned out to be retaining-wall-only; foundations use a

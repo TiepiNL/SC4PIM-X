@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 NIGHTTIME_STATE_CHANGE_PROP = 0x49C9C93C
 MODEL_IS_PRELIT_PROP = 0x6A845768
 
+# SimCity reserves this property-ID range for repeated
+# LotConfigPropertyLotObject entries.
+LOT_CONFIG_PROPERTY_FIRST = 0x88EDC900
+LOT_CONFIG_PROPERTY_LAST = 0x88EDCDFF
+
 
 def night_state_for(exemplar):
     """Return the model state to display under night lighting for *exemplar*.

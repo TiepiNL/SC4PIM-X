@@ -11,6 +11,8 @@ from .paths import data_file_path, image_db_path, sc4path_thumb_path
 from .SC4DataFunctions import (
     DuplicateProp,
     FinalizeCategory,
+    LOT_CONFIG_PROPERTY_FIRST,
+    LOT_CONFIG_PROPERTY_LAST,
     ReadStageVsDensity,
     ReadZoning,
     readCategoryDef,
@@ -227,8 +229,8 @@ class VirtualDat(object):
                             self.zoning[purpose, height] = [
                                 value]
 
-        fProp = self.properties[2297284864]
-        for lcp in range(2297284865, 2297286144):
+        fProp = self.properties[LOT_CONFIG_PROPERTY_FIRST]
+        for lcp in range(LOT_CONFIG_PROPERTY_FIRST + 1, LOT_CONFIG_PROPERTY_LAST + 1):
             self.properties[lcp] = DuplicateProp(fProp, lcp)
 
         return

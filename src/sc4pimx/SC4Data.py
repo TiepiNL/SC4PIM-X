@@ -17,7 +17,7 @@ from PIL import Image
 from . import FSHConverter
 from .paths import asset_path, image_db_path
 from .S3DReader import S3D
-from .SC4DataFunctions import ToTile
+from .SC4DataFunctions import LOT_CONFIG_PROPERTY_FIRST, LOT_CONFIG_PROPERTY_LAST, ToTile
 from .SC4DatTools import *
 from .textutil import encode_sc4_text, parse_sc4_xml
 from .translation import *
@@ -315,7 +315,7 @@ def Clamp(prop, v):
 
 def ConvertAPropToReadable(prop, propFormat):
     resultat = u''
-    if prop.id >= 2297284864 and prop.id <= 2297286143:
+    if LOT_CONFIG_PROPERTY_FIRST <= prop.id <= LOT_CONFIG_PROPERTY_LAST:
         mapFirstVal = [
             'Building', 'Prop', 'Texture', 'Fence', 'Flora', 'Water', 'Land', 'Network']
         mapSecondVal = ['all', 'med only', 'high only']

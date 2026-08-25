@@ -44,6 +44,10 @@ from .logsetup import configure_logging
 from .paths import asset_path, ensure_user_data_dir, image_db_dir, image_db_path, is_user_override, override_label, user_data_path
 from .S3DViewer import S3DViewer
 from .SC4Data import conversion_target_kind, list_convertible_categories, make_ltext_entry
+from .SC4DataFunctions import (
+    LOT_CONFIG_PROPERTY_FIRST as _LOT_CONFIG_PROPERTY_FIRST,
+    LOT_CONFIG_PROPERTY_LAST as _LOT_CONFIG_PROPERTY_LAST,
+)
 from .SC4LotPreview import *
 from .SC4MenuScanner import EXEMPLAR_PATCH_GROUP, SUBMENU_BUTTON_GROUP, invalidate_menu_cache
 from .settings import *
@@ -76,8 +80,6 @@ _BUILDING_EXEMPLAR_TYPE = 0x6534284A
 # Safety cap on animated-prop GIF length (frames). Vanilla ATCs sit well under
 # this; the cap just bounds file size/time for a pathological frame count.
 _ATC_GIF_MAX_FRAMES = 120
-_LOT_CONFIG_PROPERTY_FIRST = 0x88EDC900
-_LOT_CONFIG_PROPERTY_LAST = 0x88EDCDFF
 _LOT_CONFIG_BUILDING_TYPE = 0
 _LOT_CONFIG_TRANSIT_SWITCH_TYPE = 7
 _LOT_EXEMPLAR_GROUP = 0xA8FBD372

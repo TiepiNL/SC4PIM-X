@@ -99,7 +99,15 @@ from .SC4CityContext import (
     season_for_month,
 )
 from .SC4Data import *
-from .SC4DataFunctions import ToCoord, ToTile, ToUnsigned, model_is_prelit, night_state_for
+from .SC4DataFunctions import (
+    LOT_CONFIG_PROPERTY_FIRST,
+    LOT_CONFIG_PROPERTY_LAST,
+    ToCoord,
+    ToTile,
+    ToUnsigned,
+    model_is_prelit,
+    night_state_for,
+)
 from .SC4LETools import *
 from .SC4LightingProfiles import lighting_profile, lighting_profiles
 from .SC4OpenGL import MyCanvasBase
@@ -2315,8 +2323,8 @@ class LotEditorWin(wx.Frame):
     def PlaceAsset(self, data, posX, posY):
         """Add an asset proxy to the lot at tile-space (posX, posY)."""
         currentID = 0
-        lastIDProp = 2297284864
-        for lcp in range(2297284864, 2297286144):
+        lastIDProp = LOT_CONFIG_PROPERTY_FIRST - 1
+        for lcp in range(LOT_CONFIG_PROPERTY_FIRST, LOT_CONFIG_PROPERTY_LAST + 1):
             values = self.exemplar.GetProp(lcp)
             if values is None:
                 break
@@ -6327,6 +6335,8 @@ class LotEditorWin(wx.Frame):
                         yMax = max(yMax, ToCoord(values[9]))
                     break
 
+        if xMin is None:
+            return None
         xCenter = (xMin + xMax) / 2
         yCenter = (yMin + yMax) / 2
         return [xCenter, 0, yCenter, xMin, yMin, xMax, yMax]
@@ -6340,13 +6350,14 @@ class LotEditorWin(wx.Frame):
         if self.snapSize != 0:
             if self.modeEdit in [MODE_EDIT_BUILDING, MODE_EDIT_PROP, MODE_EDIT_FLORA]:
                 bbox = self.GroupBBox()
-                bbox[0] += dx
-                bbox[2] += dy
-                bbox[3] += dx
-                bbox[4] += dy
-                bbox[5] += dx
-                bbox[6] += dy
-                dSx, dSy = self.FindSnapingPos(bbox, self.snapSize)
+                if bbox is not None:
+                    bbox[0] += dx
+                    bbox[2] += dy
+                    bbox[3] += dx
+                    bbox[4] += dy
+                    bbox[5] += dx
+                    bbox[6] += dy
+                    dSx, dSy = self.FindSnapingPos(bbox, self.snapSize)
         for id, q in zip(self.selected, self.quadSelected):
             oldq = q[:]
             if self.modeEdit == MODE_EDIT_BASETEX or self.modeEdit == MODE_EDIT_OVERTEX:
