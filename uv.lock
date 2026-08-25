@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11, <3.14"
 
 [[package]]
@@ -489,7 +489,7 @@ wheels = [
 
 [[package]]
 name = "sc4pim-x"
-version = "2026.9.12"
+version = "2026.9.13"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
@@ -520,7 +520,7 @@ requires-dist = [
     { name = "pyopengl-accelerate", specifier = ">=3.1.0" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },
     { name = "tomlkit", specifier = ">=0.15.0" },
-    { name = "wxpython", specifier = "==4.3.0a16068+96cb1d0c", index = "https://wxpython.org/Phoenix/snapshot-builds/" },
+    { name = "wxpython", specifier = "==4.3.0a16068+96cb1d0c", index = "https://wxpython.org/Phoenix/snapshot-builds" },
 ]
 
 [package.metadata.requires-dev]
@@ -562,7 +562,7 @@ wheels = [
 [[package]]
 name = "wxpython"
 version = "4.3.0a16068+96cb1d0c"
-source = { registry = "https://wxpython.org/Phoenix/snapshot-builds/" }
+source = { registry = "https://wxpython.org/Phoenix/snapshot-builds" }
 dependencies = [
     { name = "numpy", marker = "python_full_version < '3.12'" },
 ]
