@@ -2396,7 +2396,15 @@ class MyTreeCtrl(wx.TreeCtrl):
             virtual_dat.atcs.append(ATCProxy(entry, atc))
         if entry.tgi[0] == 87304289:
             if 'exemplar' not in entry.__dict__:
-                entry.read_file(None, True, True)
+                try:
+                    entry.read_file(None, True, True)
+                except OSError as exc:
+                    # Unreadable source file (e.g. a >MAX_PATH path on a
+                    # process without Win32 long-path support): skip this
+                    # entry the way the cold scan skips the whole file.
+                    logger.warning('Skipping unreadable entry %s in %s: %s',
+                                   entry.tgi, entry.fileName, exc)
+                    return
                 exemplar = SC4Exemplar(entry, virtual_dat)
                 entry.exemplar = exemplar
                 entry.rawContent = None
@@ -2407,7 +2415,13 @@ class MyTreeCtrl(wx.TreeCtrl):
                 exemplar = entry.exemplar
         if not is_standard and entry.tgi[0] == 1697917002:
             if 'exemplar' not in entry.__dict__:
-                entry.read_file(None, True, True)
+                try:
+                    entry.read_file(None, True, True)
+                except OSError as exc:
+                    # See the cohort branch above: skip, don't abort startup.
+                    logger.warning('Skipping unreadable entry %s in %s: %s',
+                                   entry.tgi, entry.fileName, exc)
+                    return
                 exemplar = SC4Exemplar(entry, virtual_dat)
                 entry.exemplar = exemplar
                 entry.rawContent = None

@@ -33,11 +33,19 @@ from .translation import (
 logger = logging.getLogger(__name__)
 
 
+def format_tgi(tgi):
+    """``0xTTTTTTTT 0xGGGGGGGG 0xIIIIIIII``, or a placeholder when unknown."""
+    if not tgi:
+        return '<unknown TGI>'
+    return '0x%08X 0x%08X 0x%08X' % tuple(tgi)
+
+
 class VirtualDat(object):
     this = None
 
     def __init__(self, visual_tree):
         self.missing_pictures = None
+        self.problem_entries = []
         self.sc4path_entries = []
         self.missing_sc4path_pictures = []
         self.sc4path_metadata = {}
@@ -340,6 +348,15 @@ class VirtualDat(object):
             fileName, bStandard = item
             entries = cache.lookup(fileName)
             if entries is not None:
+                try:
+                    # A cached index is only useful if later lazy body reads
+                    # can still open its source.  Validate that before merge:
+                    # otherwise an inaccessible higher-priority cache hit can
+                    # shadow a readable provider already in TGIIndex.
+                    with open(fileName, 'rb'):
+                        pass
+                except OSError as exc:
+                    return None, bStandard, fileName, exc, None
                 return entries, bStandard, fileName, None, None
             try:
                 # dlg=None -> no wx calls happen inside the worker thread.
@@ -468,6 +485,23 @@ class VirtualDat(object):
 
         return None
 
+    def record_problem(self, entry, reason):
+        """Remember an entry the loader could not read, for the startup report."""
+        problems = getattr(self, 'problem_entries', None)
+        if problems is None:
+            problems = self.problem_entries = []
+        tgi = getattr(entry, 'tgi', None)
+        file_name = getattr(entry, 'fileName', None) or '<unknown>'
+        problems.append((tuple(tgi) if tgi else None, file_name, reason))
+
+    def problem_files(self):
+        """File names from problem_entries, in first-seen order, deduplicated."""
+        seen = []
+        for _tgi, file_name, _reason in getattr(self, 'problem_entries', ()):
+            if file_name not in seen:
+                seen.append(file_name)
+        return seen
+
     def providerFiles(self, tgi):
         """File names supplying *tgi*, in load order, winning file last."""
         tgi = tuple(tgi)
@@ -506,25 +540,50 @@ class VirtualDat(object):
         # was exhausted by the immediately-following for loop, leaving
         # downstream readers of ``self.cohorts`` (SC4PIMApp.py:629, 1486;
         # SC4VirtualDat.py:416) with an empty iterable.
+        self.problem_entries = []
         COHORT_T = 87304289
         OTHER_TS = (2058686020, 1697917002, 698733036, 1523640343)
         update_entry = self.tree.UpdateEntry
         cohorts_list = []
         cohorts_append = cohorts_list.append
         total_entries = len(self.allEntries)
+
+        def _entry_failed(entry, exc):
+            # Name the offending file and TGI for every failure, then skip
+            # unreadable sources (>MAX_PATH, deleted between scan and
+            # finalize) and re-raise anything else as a real bug.
+            logger.warning('Entry %s in %s failed to finalize',
+                           format_tgi(getattr(entry, 'tgi', None)),
+                           getattr(entry, 'fileName', '<unknown>'),
+                           exc_info=True)
+            self.record_problem(entry, '%s: %s' % (type(exc).__name__, exc))
+            if not isinstance(exc, OSError):
+                raise exc
+
         for entry_index, entry in enumerate(self.allEntries, 1):
             t0 = entry.tgi[0]
             if t0 == COHORT_T:
                 cohorts_append(entry)
-                update_entry(entry, self, entry.bStandard, dlg)
+                try:
+                    update_entry(entry, self, entry.bStandard, dlg)
+                except Exception as exc:
+                    _entry_failed(entry, exc)
             elif t0 in OTHER_TS:
-                update_entry(entry, self, entry.bStandard, dlg)
+                try:
+                    update_entry(entry, self, entry.bStandard, dlg)
+                except Exception as exc:
+                    _entry_failed(entry, exc)
             if batch_size and entry_index % batch_size == 0:
                 if dlg is not None and hasattr(dlg, 'SetStatus'):
                     dlg.SetStatus(startupBuildingResourceIndex,
                                   startupEntryProgress % (entry_index, total_entries))
                 yield
         self.cohorts = cohorts_list
+        if self.problem_entries:
+            logger.warning('%d entries in %d files could not be read: %s',
+                           len(self.problem_entries),
+                           len(self.problem_files()),
+                           ', '.join(self.problem_files()[:10]))
 
         FinalizeCategory(self.rootCategory)
         self.missing_pictures = []
