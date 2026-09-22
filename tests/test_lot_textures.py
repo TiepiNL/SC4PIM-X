@@ -91,3 +91,42 @@ def test_editor_builds_every_zoom_as_rgba_for_mixed_alpha_texture(decoded):
     assert editor.lotBaseTextures == []
     # The asset picker reuses the editor's decision.
     assert lot_texture_is_overlay(dat, TEX_ID) is True
+
+
+def test_missing_zoom_uses_closest_lower_zoom(decoded):
+    dat = fake_dat({0: OPAQUE, 1: OPAQUE, 2: ALPHA, 4: OPAQUE})
+
+    texture = load_lot_texture(dat, TEX_ID)
+
+    assert texture.substitutes == {3: 2}
+    assert texture.zooms[3] is texture.zooms[2]
+    assert texture.is_overlay is True
+
+
+def test_missing_lowest_zoom_uses_closest_higher_zoom(decoded):
+    dat = fake_dat({2: OPAQUE, 3: OPAQUE, 4: OPAQUE})
+
+    texture = load_lot_texture(dat, TEX_ID)
+
+    assert texture.substitutes == {0: 2, 1: 2}
+    assert texture.zooms[0] is texture.zooms[2]
+
+
+def test_texture_without_any_zoom_is_missing(decoded):
+    assert load_lot_texture(fake_dat({}), TEX_ID) is None
+
+
+def test_editor_warns_about_stand_in_zooms(decoded, caplog):
+    dat = fake_dat({0: OPAQUE, 1: OPAQUE, 2: OPAQUE, 4: OPAQUE})
+    editor = SimpleNamespace(
+        virtualDAT=dat,
+        lotBaseTextures=[],
+        lotOverTextures=[],
+        Img2OGL=lambda im, alpha: (im.mode, alpha),
+    )
+
+    bBase, textures = LotEditorWin.GetTextures(editor, TEX_ID)
+
+    assert bBase is True
+    assert len(textures) == 5
+    assert "0xF89049B0 is missing zoom level(s) 4; using 3 instead" in caplog.text

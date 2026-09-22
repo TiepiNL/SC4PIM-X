@@ -4102,6 +4102,13 @@ class LotEditorWin(wx.Frame):
         texture = load_lot_texture(self.virtualDAT, texID)
         if texture is None:
             return (False, [])
+        if texture.substitutes:
+            logger.warning(
+                "Lot texture 0x%08X is missing zoom level(s) %s; using %s instead",
+                texID,
+                ", ".join(str(z + 1) for z in texture.substitutes),
+                ", ".join(str(z + 1) for z in texture.substitutes.values()),
+            )
         # Base/overlay is decided once for the whole texture, so every zoom
         # level gets the same channel layout.
         textures = []

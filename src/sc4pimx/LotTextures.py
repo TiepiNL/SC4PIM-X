@@ -2,7 +2,8 @@
 
 A lot texture is five FSH entries (type 0x7AB50E44, group 0x0986135E), one
 per zoom level at IIDs ``tex_id + 0`` (zoom 1, lowest resolution) through
-``tex_id + 4`` (zoom 5).
+``tex_id + 4`` (zoom 5). A missing zoom level is stood in for by the closest
+lower one that exists (the closest higher one when zoom 1 is missing).
 
 Whether a texture is a base or an overlay is decided once for the texture as
 a whole: it is an overlay when any pixel at any zoom level is not fully
@@ -15,7 +16,7 @@ The texture format is deliberately not used: Maxis overlays use DXT1 (1-bit
 alpha) at zoom 5, and fully opaque DXT3 bases exist.
 """
 import threading
-from typing import List, NamedTuple, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 from . import FSHConverter
 from .SC4DatTools import snapshot_entry_content
@@ -42,10 +43,19 @@ class LotTextureZoom(NamedTuple):
 class LotTexture(NamedTuple):
     is_overlay: bool
     zooms: List[LotTextureZoom]
+    # Missing zoom level -> zoom level whose image stands in for it.
+    substitutes: Dict[int, int]
 
 
 def _zoom_entry(virtual_dat, tex_id, zoom):
     return virtual_dat.getEntry(LOT_TEXTURE_TYPE, LOT_TEXTURE_GROUP, tex_id + zoom)
+
+
+def _stand_in_zoom(present, zoom):
+    lower = [z for z in present if z < zoom]
+    if lower:
+        return max(lower)
+    return min(z for z in present if z > zoom)
 
 
 def _decode_zoom(entry):
@@ -71,17 +81,24 @@ def _remember(virtual_dat, tex_id, is_overlay):
 def load_lot_texture(virtual_dat, tex_id) -> Optional[LotTexture]:
     """Decode every zoom level of lot texture ``tex_id`` and classify it.
 
-    Returns ``None`` when a zoom level is missing.
+    Returns ``None`` when no zoom level exists at all.
     """
-    zooms = []
+    decoded = {}
     for zoom in range(ZOOM_LEVELS):
         entry = _zoom_entry(virtual_dat, tex_id, zoom)
-        if entry is None:
-            return None
-        zooms.append(_decode_zoom(entry))
-    is_overlay = any(z.has_alpha for z in zooms)
+        if entry is not None:
+            decoded[zoom] = _decode_zoom(entry)
+    if not decoded:
+        return None
+    substitutes = {
+        zoom: _stand_in_zoom(decoded, zoom)
+        for zoom in range(ZOOM_LEVELS)
+        if zoom not in decoded
+    }
+    zooms = [decoded[substitutes.get(zoom, zoom)] for zoom in range(ZOOM_LEVELS)]
+    is_overlay = any(z.has_alpha for z in decoded.values())
     _remember(virtual_dat, tex_id, is_overlay)
-    return LotTexture(is_overlay, zooms)
+    return LotTexture(is_overlay, zooms, substitutes)
 
 
 def lot_texture_is_overlay(virtual_dat, tex_id) -> bool:
