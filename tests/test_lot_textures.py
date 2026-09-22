@@ -130,3 +130,28 @@ def test_editor_warns_about_stand_in_zooms(decoded, caplog):
     assert bBase is True
     assert len(textures) == 5
     assert "0xF89049B0 is missing zoom level(s) 4; using 3 instead" in caplog.text
+
+
+def test_object_that_fails_to_cache_is_not_added_to_the_lot(monkeypatch):
+    import sc4pimx.SC4LotPreview as lot_preview
+
+    added = []
+
+    def fail(values):
+        raise AttributeError("'bool' object has no attribute 'split'")
+
+    editor = SimpleNamespace(
+        exemplar=SimpleNamespace(
+            GetProp=lambda prop_id: [2, 2] if prop_id == 0x88EDC790 else None,
+            AddTextProp=added.append,
+        ),
+        virtualDAT=SimpleNamespace(properties={0x88EDC900: "prop"}),
+        _push_undo=lambda: None,
+        PreCacheObject=fail,
+    )
+    monkeypatch.setattr(lot_preview, "CreateAProp", lambda prop, values: values)
+
+    with pytest.raises(AttributeError):
+        LotEditorWin.PlaceConstraint(editor, 0, 0, 5)
+
+    assert added == []

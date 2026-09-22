@@ -2260,8 +2260,8 @@ class LotEditorWin(wx.Frame):
             return
         self._push_undo()
         values = make_transit_values(currentID, tile_x, tile_y, self.transitDefaults)
-        self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], values[:]))
         self.PreCacheObject(values[:])
+        self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], values[:]))
         self.selected = [currentID]
         self.quadSelected = [tile_quad(tile_x, tile_y)]
         self.UpdatePIM()
@@ -2313,8 +2313,8 @@ class LotEditorWin(wx.Frame):
             0,
             currentID,
         ]
-        self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], values[:]))
         self.PreCacheObject(values[:])
+        self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], values[:]))
         self.selected = [currentID]
         self.quadSelected = [tile_quad(tile_x, tile_y)]
         self.UpdatePIM()
@@ -2399,8 +2399,9 @@ class LotEditorWin(wx.Frame):
         xmax = ToUnsigned(xmax * 1048576)
         ymax = ToUnsigned(ymax * 1048576)
         v = [vType, 0, 2, posX, 0, posY, xmin, ymin, xmax, ymax, 0, currentID, v12]
+        # Cache first: an asset that fails to load must not be left in the lot.
+        self.PreCacheObject(v[:])
         self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], v[:]))
-        self.PreCacheObject(v)
         self.UpdatePIM()
         self.RebuildVars()
         self.on_draw()
@@ -3144,8 +3145,8 @@ class LotEditorWin(wx.Frame):
             if v[0] == TRANSIT_OBJECT_TYPE:
                 ensure_transit_values(v)
             v[11] = currentID
+            self.PreCacheObject(v[:])
             self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], v[:]))
-            self.PreCacheObject(v)
             self.newIds.append(lastIDProp)
             lastIDProp += 1
             currentID += 1
