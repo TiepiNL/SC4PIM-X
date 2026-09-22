@@ -74,6 +74,30 @@ generic_saveValue = 3
 COMPRESSED_SIG = 64272
 translationTable = bytes([35] * 32 + list(range(32, 128)) + [35] * 128)
 
+def snapshot_entry_content(entry):
+    """Read and decompress an entry's bytes without mutating the entry.
+
+    Safe to call from worker threads. Entry objects are shared across the app and
+    ``read_file`` caches content on the entry, so instead we read straight
+    from the backing file with a private handle — no shared state, so any
+    number of decode jobs can snapshot concurrently.
+    """
+    if entry is None:
+        return None
+    try:
+        if entry.rawContent is not None and entry.content is not None:
+            # In-memory entry (e.g. freshly written); already decompressed.
+            return bytes(entry.content)
+        with open(entry.fileName, 'rb') as fh:
+            fh.seek(entry.initialFileLocation)
+            raw = fh.read(entry.filesize)
+        if len(raw) >= 8 and struct.unpack('H', raw[4:6])[0] == COMPRESSED_SIG:
+            return QFS.decode(raw[4:])
+        return raw
+    except Exception:
+        return None
+
+
 def InfoEx():
     pass
 

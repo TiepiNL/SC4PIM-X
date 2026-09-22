@@ -60,6 +60,7 @@ from PIL import Image
 from . import FSHConverter, SC4IconMakerDlg, SC4Matrix, treeDnD
 from .ATCReader import ATC
 from .config import load_lot_editor, save_lot_editor
+from .LotTextures import PREVIEW_ZOOM, load_lot_texture
 from .paths import background_path
 from .S3DShaders import (
     DAY_PRESET,
@@ -4098,33 +4099,22 @@ class LotEditorWin(wx.Frame):
             self.textures[index, 0] = [[texture] * 5, True]
 
     def GetTextures(self, texID):
+        texture = load_lot_texture(self.virtualDAT, texID)
+        if texture is None:
+            return (False, [])
+        # Base/overlay is decided once for the whole texture, so every zoom
+        # level gets the same channel layout.
         textures = []
-        bBase = True
-        for zLevel in range(5):
-            texEntry = self.virtualDAT.getEntry(2058686020, 159781726, texID + zLevel)
-            if texEntry is not None:
-                texEntry.read_file(None, True, True)
-                nbrLayers, trueAlpha, img, alpha, size = FSHConverter.decodeFSH(texEntry.content)
-                texEntry.content = None
-                texEntry.rawContent = None
-                if trueAlpha:
-                    if zLevel == 0:
-                        bBase = False
-                    imBmp = bBase or Image.frombytes("RGB", size, img)
-                    imAlpha = Image.frombytes("L", size, alpha)
-                    im = Image.merge("RGBA", imBmp.split() + imAlpha.split())
-                    textures.append(self.Img2OGL(im, True))
-                    if zLevel == 3:
-                        self.lotOverTextures.append(texID + zLevel)
-                else:
-                    im = Image.frombytes("RGB", size, img)
-                    textures.append(self.Img2OGL(im, False))
-                    if zLevel == 3:
-                        self.lotBaseTextures.append(texID + zLevel)
-            else:
-                return (False, [])
-
-        return (bBase, textures)
+        for zoom in texture.zooms:
+            im = Image.frombytes("RGB", zoom.size, zoom.img)
+            if texture.is_overlay:
+                im.putalpha(Image.frombytes("L", zoom.size, zoom.alpha))
+            textures.append(self.Img2OGL(im, texture.is_overlay))
+        if texture.is_overlay:
+            self.lotOverTextures.append(texID + PREVIEW_ZOOM)
+        else:
+            self.lotBaseTextures.append(texID + PREVIEW_ZOOM)
+        return (not texture.is_overlay, textures)
 
     def GetTexturesLE(self, texGID, texIID):
         textures = []

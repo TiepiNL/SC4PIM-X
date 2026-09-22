@@ -64,6 +64,8 @@ class VirtualDat(object):
         # this metadata to draw crisp badges without decoding textures while
         # painting or scrolling.
         self.textureLayerCounts = {}
+        # Lot texture IID -> is overlay, filled by LotTextures.
+        self.lotTextureOverlay = {}
         self.s3dEntries = {}
         self.allTextures = []
         self.allEntries = []

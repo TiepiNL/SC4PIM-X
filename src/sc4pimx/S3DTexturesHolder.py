@@ -2,7 +2,6 @@
 import ctypes
 import logging
 import os
-import struct
 import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -35,19 +34,18 @@ from OpenGL.GL import (
 )
 from PIL import Image
 
-from . import FSHConverter, QFS
+from . import FSHConverter
+from .SC4DatTools import snapshot_entry_content
 from .SC4Renderer import create_texture_2d
 
 logger = logging.getLogger(__name__)
 
-# _snapshot_content reads entry bytes through its own file handle and never
+# snapshot_entry_content reads entry bytes through its own file handle and never
 # touches shared entry state, so decode jobs are independent and can run in
 # parallel. GL uploads remain on the context-owning UI thread.
 _decode_executor = ThreadPoolExecutor(
     max_workers=min(8, os.cpu_count() or 1), thread_name_prefix="sc4-fsh-decode",
 )
-
-_COMPRESSED_SIG = 64272  # QFS signature, see SC4DatTools.COMPRESSED_SIG
 
 
 class _MeshGLBuffers(object):
@@ -126,30 +124,6 @@ def _delete_texture(value):
     glDeleteTextures([_texture_name(value)])
 
 
-def _snapshot_content(entry):
-    """Read and decompress an entry's bytes without mutating the entry.
-
-    Runs on decode workers. Entry objects are shared across the app and
-    ``read_file`` caches content on the entry, so instead we read straight
-    from the backing file with a private handle — no shared state, so any
-    number of decode jobs can snapshot concurrently.
-    """
-    if entry is None:
-        return None
-    try:
-        if entry.rawContent is not None and entry.content is not None:
-            # In-memory entry (e.g. freshly written); already decompressed.
-            return bytes(entry.content)
-        with open(entry.fileName, 'rb') as fh:
-            fh.seek(entry.initialFileLocation)
-            raw = fh.read(entry.filesize)
-        if len(raw) >= 8 and struct.unpack('H', raw[4:6])[0] == _COMPRESSED_SIG:
-            return QFS.decode(raw[4:])
-        return raw
-    except Exception:
-        return None
-
-
 def _decode_layers(content):
     """Decode a snapped FSH byte string into (size, RGBA bytes) layers."""
     if content is None:
@@ -202,8 +176,8 @@ def _prepare_layers(day_entry, night_entry, night_mode):
     Takes the raw entries (not pre-read bytes) so the expensive read/QFS
     step runs on the worker instead of the UI thread that scheduled it.
     """
-    day_layers = _decode_layers(_snapshot_content(day_entry))
-    night_layers = _decode_layers(_snapshot_content(night_entry)) if night_mode else None
+    day_layers = _decode_layers(snapshot_entry_content(day_entry))
+    night_layers = _decode_layers(snapshot_entry_content(night_entry)) if night_mode else None
     if night_mode and day_layers and night_layers:
         chosen = []
         for index, (size, day_rgba) in enumerate(day_layers):
