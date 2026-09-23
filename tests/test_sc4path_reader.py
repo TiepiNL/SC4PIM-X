@@ -148,8 +148,8 @@ def test_entry_exit_edge_warnings():
     )
 
     assert len(path_file.warnings) == 2
-    assert "Entry point does not touch south edge" in path_file.warnings[0]
-    assert "Exit point does not touch north edge" in path_file.warnings[1]
+    assert "Entry point does not touch y = -8 edge" in path_file.warnings[0]
+    assert "Exit point does not touch y = +8 edge" in path_file.warnings[1]
 
 
 def test_invalid_header_raises():

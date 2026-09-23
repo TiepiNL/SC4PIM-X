@@ -414,11 +414,13 @@ def _validate_side(
 ) -> None:
     if side == 255:
         return
+    # Sides name the file's own axes; in a lot they sit a half turn from the
+    # compass (see rotate_local_point), so report the edge by coordinate.
     expected = {
-        0: (point.x_east, -8.0, "west"),
-        1: (point.y_north, 8.0, "north"),
-        2: (point.x_east, 8.0, "east"),
-        3: (point.y_north, -8.0, "south"),
+        0: (point.x_east, -8.0, "x = -8"),
+        1: (point.y_north, 8.0, "y = +8"),
+        2: (point.x_east, 8.0, "x = +8"),
+        3: (point.y_north, -8.0, "y = -8"),
     }.get(side)
     if expected is None:
         warnings.append("Line %d: unknown %s side %d" % (path.line_no, label, side))
