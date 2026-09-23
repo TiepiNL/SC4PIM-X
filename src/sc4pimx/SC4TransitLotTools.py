@@ -99,15 +99,13 @@ DEFAULT_TRANSIT_SETTINGS = {
 }
 
 # Rep 3 orientation, labelled by where the tile's local North edge ends up.
-# 0 is unrotated and each step turns the tile 90 degrees counter-clockwise
-# (N -> W), the same as SC4PathReader.rotate_local_point. Flag 2 = South matches
-# SC4Tool and Maxis lots; for 1/3 SC4Tool says East/West, but in game TE tiles
-# turn the opposite way to lot textures (checked on a flag-3 ramp test lot).
+# Matches SC4Tool's LotTile.GetTraffic: 0 is unrotated and each step turns the
+# tile 90 degrees clockwise (N -> E), for the edge mask and SC4Paths alike.
 ROTATION_CHOICES = [
     (0, LEXFacingNorth),
-    (1, LEXFacingWest),
+    (1, LEXFacingEast),
     (2, LEXFacingSouth),
-    (3, LEXFacingEast),
+    (3, LEXFacingWest),
 ]
 
 DIR_BITS = [
@@ -645,13 +643,12 @@ def draw_sc4path_overlay_3d(editor, tex_data, active=False):
 def _draw_mask_edges(primitives, mvp, minx, miny, mask, orientation, color, width):
     cx = minx + 8
     cy = miny + 8
-    # Orientation 0 is unrotated; each step is 90 degrees counter-clockwise
-    # (N -> W), matching the SC4Path overlay (see ROTATION_CHOICES).
+    # Orientation 0 is unrotated; each step is 90 degrees clockwise (N -> E).
     rotation_steps = int(orientation) & 3
     positions = []
     for _name, normal_bit, alt_bit, direction in DIR_BITS:
         if mask & (normal_bit | alt_bit):
-            edge, inner = DIR_GEOMETRY[(direction - rotation_steps) % 4]
+            edge, inner = DIR_GEOMETRY[(direction + rotation_steps) % 4]
             ex = minx + edge[0] * 16
             ey = miny + edge[1] * 16
             ix = minx + inner[0] * 16
