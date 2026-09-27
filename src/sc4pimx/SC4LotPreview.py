@@ -6333,14 +6333,15 @@ class LotEditorWin(wx.Frame):
             square = square.resize((size, size), Image.LANCZOS)
         return square
 
-    def GenerateLotPreviews(self, size=512, skip_fresh=False, updated=None, version_current=True, restore_view=True):
+    def GenerateLotPreviews(self, size=512, skip_fresh=False, updated=None, valid_since=0.0, restore_view=True):
         """Render and cache all eight views of the current lot.
 
         Writes ``S/W/N/E`` x day/night RGBA PNGs under
         :func:`image_db_lots_dir`, keyed on the lot's GID+IID, and returns the
         list of written paths. With ``skip_fresh`` a view is left untouched
-        only when it is present, current-generation and newer than ``updated``
-        (the lot's mtime) -- so a stale cache re-renders (resumable bulk
+        only when it is present, current-generation (written after
+        ``valid_since``, see :func:`cache_valid_since`) and newer than
+        ``updated`` (the lot's mtime) -- so a stale cache re-renders (resumable bulk
         rendering); with ``restore_view`` false the final on-screen repaint is
         skipped (bulk rendering into a hidden window). Only meaningful for a
         LotConfigurations exemplar (the only thing the lot editor displays).
@@ -6367,7 +6368,7 @@ class LotEditorWin(wx.Frame):
         try:
             for view in lot_views():
                 path = lot_view_path(gid, iid, view)
-                if skip_fresh and lot_view_fresh(gid, iid, view, updated, version_current):
+                if skip_fresh and lot_view_fresh(gid, iid, view, updated, valid_since):
                     continue
                 image = self.RenderLotView(view.rotation, view.night, size)
                 image.save(str(path), "PNG")

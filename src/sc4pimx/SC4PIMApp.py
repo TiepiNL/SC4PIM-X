@@ -41,7 +41,7 @@ from .ATCViewer import *
 from .ConvertLotBuildingDlg import MODE_OVERRIDE, ConvertLotBuildingDialog
 from .DependenciesDlg import *
 from .logsetup import configure_logging
-from .lot_image_cache import cache_version_current, default_lot_view, ensure_cache_version, lot_views, stale_lot_pictures, write_cache_version
+from .lot_image_cache import cache_valid_since, default_lot_view, ensure_cache_version, lot_views, stale_lot_pictures
 from .paths import asset_path, ensure_user_data_dir, image_db_dir, image_db_lots_dir, image_db_lots_path, image_db_path, is_user_override, override_label, user_data_path
 from .S3DViewer import S3DViewer
 from .SC4Data import conversion_target_kind, list_convertible_categories, make_ltext_entry
@@ -6734,12 +6734,12 @@ class MainFrame(wx.Frame):
             wx.MessageBox(LEXRenderLotsNoLots, LEXRenderLotsDialogTitle, wx.OK | wx.ICON_INFORMATION, self)
             return
         by_tgi = {(d.exemplar.entry.tgi[1], d.exemplar.entry.tgi[2]): d for d in descriptors}
-        version_current = cache_version_current()
+        valid_since = cache_valid_since()
         lots = [
             (gid, iid, getattr(desc.exemplar.entry, 'dateUpdated', 0))
             for (gid, iid), desc in by_tgi.items()
         ]
-        worklist = stale_lot_pictures(lots, version_current)
+        worklist = stale_lot_pictures(lots, valid_since)
         if not worklist:
             wx.MessageBox(LEXRenderLotsAllCached % len(by_tgi), LEXRenderLotsDialogTitle,
                           wx.OK | wx.ICON_INFORMATION, self)
@@ -6753,7 +6753,7 @@ class MainFrame(wx.Frame):
         if wx.MessageBox(message, LEXRenderLotsDialogTitle, wx.YES_NO | wx.ICON_QUESTION, self) != wx.YES:
             return
         todo = [by_tgi[key] for key in render_keys]
-        self._run_lot_render(todo, version_current)
+        self._run_lot_render(todo, valid_since)
 
     def _get_offscreen_lot_editor(self):
         """Lazily create and reuse one hidden editor for offscreen rendering.
@@ -6790,7 +6790,7 @@ class MainFrame(wx.Frame):
         self._lotRenderFrame = frame
         return frame
 
-    def _render_one_lot(self, frame, exemplar, skip_fresh, updated=None, version_current=True):
+    def _render_one_lot(self, frame, exemplar, skip_fresh, updated=None, valid_since=0.0):
         """Render one lot's previews on a reused offscreen editor."""
         frame.Display(exemplar, self.virtualDAT, True)
         # Display queues a deferred on_draw and an ambient-animation timer; over
@@ -6802,14 +6802,14 @@ class MainFrame(wx.Frame):
         if ambient is not None and ambient.IsRunning():
             ambient.Stop()
         written = frame.GenerateLotPreviews(
-            skip_fresh=skip_fresh, updated=updated, version_current=version_current, restore_view=False
+            skip_fresh=skip_fresh, updated=updated, valid_since=valid_since, restore_view=False
         )
         # Free this lot's GL textures/meshes; otherwise the reused editor
         # accumulates them and each lot gets progressively slower.
         frame.ReleaseLotGL()
         return written
 
-    def _run_lot_render(self, descriptors, version_current):
+    def _run_lot_render(self, descriptors, valid_since):
         progress = wx.ProgressDialog(
             LEXRenderLotsProgressTitle,
             LEXRenderLotsProgressMessage % (0, len(descriptors)),
@@ -6822,6 +6822,7 @@ class MainFrame(wx.Frame):
         rendered_images = 0
         skipped = 0
         completed = True
+        run_started = time.time()
         batch_start = time.perf_counter()
         try:
             for index, descriptor in enumerate(descriptors, 1):
@@ -6832,7 +6833,7 @@ class MainFrame(wx.Frame):
                 try:
                     updated = getattr(descriptor.exemplar.entry, 'dateUpdated', 0)
                     rendered_images += len(
-                        self._render_one_lot(frame, descriptor.exemplar, True, updated, version_current)
+                        self._render_one_lot(frame, descriptor.exemplar, True, updated, valid_since)
                     )
                     rendered_lots += 1
                 except Exception as exc:
@@ -6842,11 +6843,12 @@ class MainFrame(wx.Frame):
                     logger.warning('Skipped lot %s: %s: %s',
                                    descriptor.exemplar.entry.tgi, type(exc).__name__, exc)
         finally:
-            # A full pass (not cancelled) means the whole cache is now at the
-            # current generator version; record it so later runs don't re-flag
-            # everything as version-stale.
+            # A full pass (not cancelled) rendered every stale lot with the
+            # current generator; stamp the version from this run's start so
+            # those images count as current, while anything older (lots that
+            # failed, or cached lots outside the current plugin set) stays stale.
             if completed:
-                write_cache_version()
+                ensure_cache_version(run_started)
             logger.info('Lot render finished: %d lots, %d images, %d skipped in %.1f s',
                         rendered_lots, rendered_images, skipped, time.perf_counter() - batch_start)
             progress.Destroy()
@@ -6862,6 +6864,7 @@ class MainFrame(wx.Frame):
         if not isinstance(model, LotPreviewModel):
             return
         failed = False
+        render_started = time.time()
         wx.BeginBusyCursor()
         try:
             frame = self._get_offscreen_lot_editor()
@@ -6875,8 +6878,9 @@ class MainFrame(wx.Frame):
             wx.MessageBox(LEXLotPreviewRenderFailed, LEXLotPreviewRender, wx.OK | wx.ICON_WARNING, self)
             return
         # The cache now has current-generation images for at least this lot;
-        # bootstrap the version sidecar if it was never written.
-        ensure_cache_version()
+        # stamp the version from this render's start if it isn't current, so
+        # only images at least that new count as current.
+        ensure_cache_version(render_started)
         # Reload the preview from the freshly written images and relabel button.
         model._shown = None
         zoom = self.cbZoom.GetClientData(self.cbZoom.GetSelection())
