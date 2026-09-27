@@ -84,6 +84,16 @@ def test_ensure_cache_version_restamps_an_older_version(user_dir):
     assert lic.read_cache_version() == lic.LOT_PREVIEW_GENERATOR_VERSION
 
 
+def test_images_written_after_stamping_count_as_current(user_dir):
+    # A run stamps before rendering, so whatever it wrote before a cancel is
+    # already current and the next run resumes instead of starting over.
+    gid, iid = AIG_TOWER
+    valid_since = lic.ensure_cache_version()
+    _write_all_views(gid, iid)
+    assert lic.stale_lot_pictures([(gid, iid, None)], valid_since) == []
+    assert lic.stale_lot_pictures([(gid, iid, None)], lic.cache_valid_since()) == []
+
+
 def test_lot_view_fresh_considers_presence_version_and_mtime(user_dir):
     gid, iid = AIG_TOWER
     view = lic.LotView(0, night=False)

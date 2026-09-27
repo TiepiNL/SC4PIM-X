@@ -6753,7 +6753,7 @@ class MainFrame(wx.Frame):
         if wx.MessageBox(message, LEXRenderLotsDialogTitle, wx.YES_NO | wx.ICON_QUESTION, self) != wx.YES:
             return
         todo = [by_tgi[key] for key in render_keys]
-        self._run_lot_render(todo, valid_since)
+        self._run_lot_render(todo)
 
     def _get_offscreen_lot_editor(self):
         """Lazily create and reuse one hidden editor for offscreen rendering.
@@ -6809,7 +6809,12 @@ class MainFrame(wx.Frame):
         frame.ReleaseLotGL()
         return written
 
-    def _run_lot_render(self, descriptors, valid_since):
+    def _run_lot_render(self, descriptors):
+        # Stamp the current generator version before rendering (a no-op when it
+        # already is current): every image written from here on counts as
+        # current, so a cancelled run resumes where it left off, while images
+        # from an older generator stay stale.
+        valid_since = ensure_cache_version()
         progress = wx.ProgressDialog(
             LEXRenderLotsProgressTitle,
             LEXRenderLotsProgressMessage % (0, len(descriptors)),
@@ -6821,14 +6826,11 @@ class MainFrame(wx.Frame):
         rendered_lots = 0
         rendered_images = 0
         skipped = 0
-        completed = True
-        run_started = time.time()
         batch_start = time.perf_counter()
         try:
             for index, descriptor in enumerate(descriptors, 1):
                 keep_going, _ = progress.Update(index - 1, LEXRenderLotsProgressMessage % (index, len(descriptors)))
                 if not keep_going:
-                    completed = False
                     break
                 try:
                     updated = getattr(descriptor.exemplar.entry, 'dateUpdated', 0)
@@ -6843,12 +6845,6 @@ class MainFrame(wx.Frame):
                     logger.warning('Skipped lot %s: %s: %s',
                                    descriptor.exemplar.entry.tgi, type(exc).__name__, exc)
         finally:
-            # A full pass (not cancelled) rendered every stale lot with the
-            # current generator; stamp the version from this run's start so
-            # those images count as current, while anything older (lots that
-            # failed, or cached lots outside the current plugin set) stays stale.
-            if completed:
-                ensure_cache_version(run_started)
             logger.info('Lot render finished: %d lots, %d images, %d skipped in %.1f s',
                         rendered_lots, rendered_images, skipped, time.perf_counter() - batch_start)
             progress.Destroy()
@@ -6864,7 +6860,8 @@ class MainFrame(wx.Frame):
         if not isinstance(model, LotPreviewModel):
             return
         failed = False
-        render_started = time.time()
+        # Stamp before rendering so this lot's new images count as current.
+        ensure_cache_version()
         wx.BeginBusyCursor()
         try:
             frame = self._get_offscreen_lot_editor()
@@ -6877,10 +6874,6 @@ class MainFrame(wx.Frame):
         if failed:
             wx.MessageBox(LEXLotPreviewRenderFailed, LEXLotPreviewRender, wx.OK | wx.ICON_WARNING, self)
             return
-        # The cache now has current-generation images for at least this lot;
-        # stamp the version from this render's start if it isn't current, so
-        # only images at least that new count as current.
-        ensure_cache_version(render_started)
         # Reload the preview from the freshly written images and relabel button.
         model._shown = None
         zoom = self.cbZoom.GetClientData(self.cbZoom.GetSelection())
