@@ -287,13 +287,16 @@ def path_bounds(path_file: SC4PathFile) -> tuple[float, float, float, float, flo
 def rotate_local_point(point: SC4PathPoint, orientation: int) -> SC4PathPoint:
     """Rotate a tile-local path point by a lot-object orientation flag.
 
-    Orientation 0 is unrotated; each step follows SC4's path rotation.
-    Returns lot-frame coordinates, where +y points South.
+    Returns lot-frame coordinates, where +y points South. At orientation 0 a
+    lot path's +x runs West and its +y South (a half turn from the file's
+    east/north naming): only then do path ends meet the tile's edge-mask
+    bytes and the lot's road textures. Each step then turns 90 degrees
+    clockwise (N -> E), like the edge mask.
     """
-    x = point.x_east
-    y = -point.y_north
+    x = -point.x_east
+    y = point.y_north
     for _idx in range(int(orientation) & 3):
-        x, y = y, -x
+        x, y = -y, x
     return SC4PathPoint(x, y, point.z_height, point.line_no)
 
 
@@ -411,11 +414,13 @@ def _validate_side(
 ) -> None:
     if side == 255:
         return
+    # Sides name the file's own axes; in a lot they sit a half turn from the
+    # compass (see rotate_local_point), so report the edge by coordinate.
     expected = {
-        0: (point.x_east, -8.0, "west"),
-        1: (point.y_north, 8.0, "north"),
-        2: (point.x_east, 8.0, "east"),
-        3: (point.y_north, -8.0, "south"),
+        0: (point.x_east, -8.0, "x = -8"),
+        1: (point.y_north, 8.0, "y = +8"),
+        2: (point.x_east, 8.0, "x = +8"),
+        3: (point.y_north, -8.0, "y = -8"),
     }.get(side)
     if expected is None:
         warnings.append("Line %d: unknown %s side %d" % (path.line_no, label, side))

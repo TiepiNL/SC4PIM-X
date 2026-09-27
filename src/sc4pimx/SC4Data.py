@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
 from . import FSHConverter
+from .LotTextures import PREVIEW_ZOOM, clear_lot_texture_cache, lot_texture_is_overlay
 from .paths import asset_path, image_db_path
 from .S3DReader import S3D
 from .SC4DataFunctions import LOT_CONFIG_PROPERTY_FIRST, LOT_CONFIG_PROPERTY_LAST, ToTile
@@ -534,6 +535,7 @@ class ImageListLoaderTexture(object):
     def Start(self):
         self.keepGoing = self.running = True
         self.virtualDAT.textureLayerCounts.clear()
+        clear_lot_texture_cache(self.virtualDAT)
         if _env_true('SC4PIM_SKIP_TEXTURE_IMAGES'):
             self.running = False
             return
@@ -646,6 +648,15 @@ class ImageListLoaderTexture(object):
             return None
         texEntry.content = None
         texEntry.rawContent = None
+        # Base vs overlay is a property of the whole texture (all zoom
+        # levels), not of this one preview image.
+        try:
+            trueAlpha = lot_texture_is_overlay(
+                self.virtualDAT, texEntry.tgi[2] - PREVIEW_ZOOM
+            )
+        except Exception as exc:
+            logger.warning('TextureLoader: failed to classify %s: %s',
+                           texEntry.fileName, exc)
         try:
             pilz = Image.frombytes('RGB', size, img)
         except Exception as exc:

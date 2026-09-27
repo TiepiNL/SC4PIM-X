@@ -148,8 +148,8 @@ def test_entry_exit_edge_warnings():
     )
 
     assert len(path_file.warnings) == 2
-    assert "Entry point does not touch south edge" in path_file.warnings[0]
-    assert "Exit point does not touch north edge" in path_file.warnings[1]
+    assert "Entry point does not touch y = -8 edge" in path_file.warnings[0]
+    assert "Exit point does not touch y = +8 edge" in path_file.warnings[1]
 
 
 def test_invalid_header_raises():
@@ -160,14 +160,14 @@ def test_invalid_header_raises():
 def test_point_transforms_and_orientation():
     point = SC4PathPoint(2.0, -8.0, 3.5)
 
-    # Lot frame: +y South. Identity flips y_north; rotations follow SC4 paths.
-    assert rotate_local_point(point, 0).x_east == pytest.approx(2.0)
-    assert rotate_local_point(point, 0).y_north == pytest.approx(8.0)
+    # Lot frame: +y South. At 0 path +x runs West and +y South; steps are CW.
+    assert rotate_local_point(point, 0).x_east == pytest.approx(-2.0)
+    assert rotate_local_point(point, 0).y_north == pytest.approx(-8.0)
     assert rotate_local_point(point, 1).x_east == pytest.approx(8.0)
     assert rotate_local_point(point, 1).y_north == pytest.approx(-2.0)
-    assert rotate_local_point(point, 2).x_east == pytest.approx(-2.0)
-    assert rotate_local_point(point, 2).y_north == pytest.approx(-8.0)
+    assert rotate_local_point(point, 2).x_east == pytest.approx(2.0)
+    assert rotate_local_point(point, 2).y_north == pytest.approx(8.0)
     assert rotate_local_point(point, 3).x_east == pytest.approx(-8.0)
     assert rotate_local_point(point, 3).y_north == pytest.approx(2.0)
-    assert point_to_lot_2d(1, 2, 0, point) == pytest.approx((26.0, 48.0))
-    assert point_to_lot_3d(1, 2, 0, point) == pytest.approx((26.0, 3.65, 48.0))
+    assert point_to_lot_2d(1, 2, 0, point) == pytest.approx((22.0, 32.0))
+    assert point_to_lot_3d(1, 2, 0, point) == pytest.approx((22.0, 3.65, 32.0))

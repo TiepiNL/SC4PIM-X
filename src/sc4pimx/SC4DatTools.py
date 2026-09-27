@@ -74,6 +74,30 @@ generic_saveValue = 3
 COMPRESSED_SIG = 64272
 translationTable = bytes([35] * 32 + list(range(32, 128)) + [35] * 128)
 
+def snapshot_entry_content(entry):
+    """Read and decompress an entry's bytes without mutating the entry.
+
+    Safe to call from worker threads. Entry objects are shared across the app and
+    ``read_file`` caches content on the entry, so instead we read straight
+    from the backing file with a private handle — no shared state, so any
+    number of decode jobs can snapshot concurrently.
+    """
+    if entry is None:
+        return None
+    try:
+        if entry.rawContent is not None and entry.content is not None:
+            # In-memory entry (e.g. freshly written); already decompressed.
+            return bytes(entry.content)
+        with open(entry.fileName, 'rb') as fh:
+            fh.seek(entry.initialFileLocation)
+            raw = fh.read(entry.filesize)
+        if len(raw) >= 8 and struct.unpack('H', raw[4:6])[0] == COMPRESSED_SIG:
+            return QFS.decode(raw[4:])
+        return raw
+    except Exception:
+        return None
+
+
 def InfoEx():
     pass
 
@@ -411,6 +435,11 @@ class SC4Exemplar():
         self.modified = False
         self.entry = entry
         self.virtualDAT = virtualDAT
+        # Set before decoding: an unrecognized body skips DecodeBinary/Text,
+        # and with __slots__ an unassigned slot raises instead of reading None.
+        self.link = None
+        self.sig = ''
+        self.nbrProp = 0
         if entry:
             self.entry.virtual_dat = virtualDAT
             self.buffer = entry.content
@@ -569,14 +598,30 @@ class SC4Exemplar():
         magic = self.buffer[:4]
         if isinstance(magic, bytes):
             if magic in (b'CQZB', b'EQZB'):
-                self.DecodeBinary(bLazy)
-            elif magic in (b'EQZT', b'CQZT'):
-                self.DecodeText(bLazy)
+                return self.DecodeBinary(bLazy)
+            if magic in (b'EQZT', b'CQZT'):
+                return self.DecodeText(bLazy)
         else:
             if magic in ('CQZB', 'EQZB'):
-                self.DecodeBinary(bLazy)
-            elif magic in ('EQZT', 'CQZT'):
-                self.DecodeText(bLazy)
+                return self.DecodeBinary(bLazy)
+            if magic in ('EQZT', 'CQZT'):
+                return self.DecodeText(bLazy)
+        self.LogUndecodable(magic)
+
+    def LogUndecodable(self, magic):
+        # No known signature: the body is truncated, mistyped in the index or
+        # a bad QFS payload. Name it and register it for the startup report.
+        entry = self.entry
+        tgi = getattr(entry, 'tgi', None)
+        size = len(self.buffer) if self.buffer is not None else -1
+        logger.warning(
+            'Undecodable exemplar/cohort body %s in %s: %d bytes, magic %r',
+            ('0x%08X 0x%08X 0x%08X' % tuple(tgi)) if tgi else '<unknown TGI>',
+            getattr(entry, 'fileName', '<unknown>'),
+            size, magic)
+        record = getattr(self.virtualDAT, 'record_problem', None)
+        if record is not None:
+            record(entry, 'unrecognized body (%d bytes, magic %r)' % (size, magic))
 
     def DecodeText(self, bLazy=True):
         global textEx

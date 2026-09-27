@@ -62,6 +62,7 @@ from . import FSHConverter, SC4IconMakerDlg, SC4Matrix, treeDnD
 from .ATCReader import ATC
 from .config import load_lot_editor, save_lot_editor
 from .lot_image_cache import lot_view_fresh, lot_view_path, lot_views
+from .LotTextures import PREVIEW_ZOOM, load_lot_texture
 from .paths import background_path, image_db_lots_dir
 from .S3DShaders import (
     DAY_PRESET,
@@ -2351,8 +2352,8 @@ class LotEditorWin(wx.Frame):
             return
         self._push_undo()
         values = make_transit_values(currentID, tile_x, tile_y, self.transitDefaults)
-        self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], values[:]))
         self.PreCacheObject(values[:])
+        self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], values[:]))
         self.selected = [currentID]
         self.quadSelected = [tile_quad(tile_x, tile_y)]
         self.UpdatePIM()
@@ -2404,8 +2405,8 @@ class LotEditorWin(wx.Frame):
             0,
             currentID,
         ]
-        self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], values[:]))
         self.PreCacheObject(values[:])
+        self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], values[:]))
         self.selected = [currentID]
         self.quadSelected = [tile_quad(tile_x, tile_y)]
         self.UpdatePIM()
@@ -2490,8 +2491,9 @@ class LotEditorWin(wx.Frame):
         xmax = ToUnsigned(xmax * 1048576)
         ymax = ToUnsigned(ymax * 1048576)
         v = [vType, 0, 2, posX, 0, posY, xmin, ymin, xmax, ymax, 0, currentID, v12]
+        # Cache first: an asset that fails to load must not be left in the lot.
+        self.PreCacheObject(v[:])
         self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], v[:]))
-        self.PreCacheObject(v)
         self.UpdatePIM()
         self.RebuildVars()
         self.on_draw()
@@ -3235,8 +3237,8 @@ class LotEditorWin(wx.Frame):
             if v[0] == TRANSIT_OBJECT_TYPE:
                 ensure_transit_values(v)
             v[11] = currentID
+            self.PreCacheObject(v[:])
             self.exemplar.AddTextProp(CreateAProp(self.virtualDAT.properties[lastIDProp], v[:]))
-            self.PreCacheObject(v)
             self.newIds.append(lastIDProp)
             lastIDProp += 1
             currentID += 1
@@ -4193,33 +4195,29 @@ class LotEditorWin(wx.Frame):
             self.textures[index, 0] = [[texture] * 5, True]
 
     def GetTextures(self, texID):
+        texture = load_lot_texture(self.virtualDAT, texID)
+        if texture is None:
+            return (False, [])
+        if texture.substitutes:
+            logger.warning(
+                "Lot texture 0x%08X is missing zoom level(s) %s; using %s instead",
+                texID,
+                ", ".join(str(z + 1) for z in texture.substitutes),
+                ", ".join(str(z + 1) for z in texture.substitutes.values()),
+            )
+        # Base/overlay is decided once for the whole texture, so every zoom
+        # level gets the same channel layout.
         textures = []
-        bBase = True
-        for zLevel in range(5):
-            texEntry = self.virtualDAT.getEntry(2058686020, 159781726, texID + zLevel)
-            if texEntry is not None:
-                texEntry.read_file(None, True, True)
-                nbrLayers, trueAlpha, img, alpha, size = FSHConverter.decodeFSH(texEntry.content)
-                texEntry.content = None
-                texEntry.rawContent = None
-                if trueAlpha:
-                    if zLevel == 0:
-                        bBase = False
-                    imBmp = bBase or Image.frombytes("RGB", size, img)
-                    imAlpha = Image.frombytes("L", size, alpha)
-                    im = Image.merge("RGBA", imBmp.split() + imAlpha.split())
-                    textures.append(self.Img2OGL(im, True))
-                    if zLevel == 3:
-                        self.lotOverTextures.append(texID + zLevel)
-                else:
-                    im = Image.frombytes("RGB", size, img)
-                    textures.append(self.Img2OGL(im, False))
-                    if zLevel == 3:
-                        self.lotBaseTextures.append(texID + zLevel)
-            else:
-                return (False, [])
-
-        return (bBase, textures)
+        for zoom in texture.zooms:
+            im = Image.frombytes("RGB", zoom.size, zoom.img)
+            if texture.is_overlay:
+                im.putalpha(Image.frombytes("L", zoom.size, zoom.alpha))
+            textures.append(self.Img2OGL(im, texture.is_overlay))
+        if texture.is_overlay:
+            self.lotOverTextures.append(texID + PREVIEW_ZOOM)
+        else:
+            self.lotBaseTextures.append(texID + PREVIEW_ZOOM)
+        return (not texture.is_overlay, textures)
 
     def GetTexturesLE(self, texGID, texIID):
         textures = []

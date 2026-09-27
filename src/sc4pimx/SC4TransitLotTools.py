@@ -98,12 +98,14 @@ DEFAULT_TRANSIT_SETTINGS = {
     "rep16": 0,
 }
 
-# Rep 3 orientation: South=0, West=1, North=2, East=3; 0 is unrotated.
+# Rep 3 orientation, labelled by where the tile's local North edge ends up.
+# Matches SC4Tool's LotTile.GetTraffic: 0 is unrotated and each step turns the
+# tile 90 degrees clockwise (N -> E), for the edge mask and SC4Paths alike.
 ROTATION_CHOICES = [
-    (0, LEXFacingSouth),
-    (1, LEXFacingWest),
-    (2, LEXFacingNorth),
-    (3, LEXFacingEast),
+    (0, LEXFacingNorth),
+    (1, LEXFacingEast),
+    (2, LEXFacingSouth),
+    (3, LEXFacingWest),
 ]
 
 DIR_BITS = [
